@@ -1,6 +1,69 @@
 import sqlite3
 from pathlib import Path
 
+try:
+    from .seed_data_clientes import CLIENTES
+    from .seed_data_contratos import CONTRATOS
+    from .seed_data_politicas import POLITICAS
+except ImportError:
+    from seed_data_clientes import CLIENTES
+    from seed_data_contratos import CONTRATOS
+    from seed_data_politicas import POLITICAS
+
+
+def seed_clientes_contratos(cursor: sqlite3.Cursor) -> None:
+    cliente_ids_por_cpf: dict[str, int] = {}
+
+    for cliente in CLIENTES:
+        cursor.execute(
+            "INSERT INTO clientes (nome, cpf, score) VALUES (?, ?, ?)",
+            (cliente["nome"], cliente["cpf"], int(cliente["score"])),
+        )
+        cliente_ids_por_cpf[str(cliente["cpf"])] = int(cursor.lastrowid)
+
+    for contrato in CONTRATOS:
+        cpf = str(contrato["cpf"])
+        cliente_id = cliente_ids_por_cpf.get(cpf)
+        if cliente_id is None:
+            raise ValueError(f"Contrato sem cliente correspondente para CPF: {cpf}")
+
+        cursor.execute(
+            """
+            INSERT INTO contratos (
+                cliente_id,
+                valor_contrato,
+                valor_original,
+                juros_acumulado,
+                numero_parcelas,
+                parcelas_abertas,
+                dias_atraso,
+                situacao
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                cliente_id,
+                float(contrato["valor_contrato"]),
+                float(contrato["valor_original"]),
+                float(contrato["juros_acumulado"]),
+                int(contrato["numero_parcelas"]),
+                int(contrato["parcelas_abertas"]),
+                int(contrato["dias_atraso"]),
+                contrato["situacao"],
+            ),
+        )
+
+
+def seed_politicas(cursor: sqlite3.Cursor) -> None:
+    cursor.executemany(
+        """
+        INSERT INTO politicas_negociacao (
+            descricao, score_min, score_max, atraso_min, atraso_max,
+            perc_desc_principal_max, perc_desc_juros_max, altera_prazo, max_prazo
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        POLITICAS,
+    )
+
 
 def setup_database(reset_db: bool = True) -> Path:
     base_dir = Path(__file__).resolve().parent
@@ -23,83 +86,14 @@ def setup_database(reset_db: bool = True) -> Path:
         cursor.executescript(schema_sql)
 
         print("--- Populando Dados de Teste ---")
-
-        # Perfis estratégicos para o TCC, compatíveis com app/database/schema.sql
-        perfis = [
-            # Cliente 1: Bom score, pouco atraso (fácil negociação)
-            {
-                "nome": "Fulano Silva",
-                "cpf": "12345678901",
-                "score": 850,
-                "valor_contrato": 5000.00,
-                "saldo_devedor": 1000.00,
-                "numero_parcelas": 24,
-                "parcelas_abertas": 4,
-                "dias_atraso": 15,
-                "situacao": "ABERTO",
-            },
-            # Cliente 2: Score médio, atraso longo (precisa de desconto agressivo)
-            {
-                "nome": "Ciclano Oliveira",
-                "cpf": "98765432100",
-                "score": 420,
-                "valor_contrato": 12000.00,
-                "saldo_devedor": 6000.00,
-                "numero_parcelas": 24,
-                "parcelas_abertas": 12,
-                "dias_atraso": 45,
-                "situacao": "ABERTO",
-            },
-            # Cliente 3: Score baixo, reincidente (maior risco)
-            {
-                "nome": "Beltrana Santos",
-                "cpf": "11122233344",
-                "score": 150,
-                "valor_contrato": 2500.00,
-                "saldo_devedor": 2500.00,
-                "numero_parcelas": 10,
-                "parcelas_abertas": 10,
-                "dias_atraso": 720,
-                "situacao": "ABERTO",
-            },
-        ]
-
-        for p in perfis:
-            cursor.execute(
-                "INSERT INTO clientes (nome, cpf, score) VALUES (?, ?, ?)",
-                (p["nome"], p["cpf"], int(p["score"])),
-            )
-            client_id = cursor.lastrowid
-
-            cursor.execute(
-                """
-                INSERT INTO contratos (
-                    cliente_id,
-                    valor_contrato,
-                    saldo_devedor,
-                    numero_parcelas,
-                    parcelas_abertas,
-                    dias_atraso,
-                    situacao
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    client_id,
-                    float(p["valor_contrato"]),
-                    float(p["saldo_devedor"]),
-                    int(p["numero_parcelas"]),
-                    int(p["parcelas_abertas"]),
-                    int(p["dias_atraso"]),
-                    p["situacao"],
-                ),
-            )
+        seed_clientes_contratos(cursor)
+        seed_politicas(cursor)
 
         conn.commit()
         print(f"✅ Banco de dados criado com sucesso em: {db_path}")
         return db_path
     finally:
         conn.close()
-
 
 if __name__ == "__main__":
     setup_database()
