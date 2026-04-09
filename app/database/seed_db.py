@@ -31,18 +31,16 @@ def seed_clientes_contratos(cursor: sqlite3.Cursor) -> None:
             """
             INSERT INTO contratos (
                 cliente_id,
-                valor_contrato,
                 valor_original,
                 juros_acumulado,
                 numero_parcelas,
                 parcelas_abertas,
                 dias_atraso,
                 situacao
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 cliente_id,
-                float(contrato["valor_contrato"]),
                 float(contrato["valor_original"]),
                 float(contrato["juros_acumulado"]),
                 int(contrato["numero_parcelas"]),
@@ -85,12 +83,13 @@ def setup_database(reset_db: bool = True) -> Path:
         schema_sql = schema_path.read_text(encoding="utf-8")
         cursor.executescript(schema_sql)
 
-        print("--- Populando Dados de Teste ---")
+        print("--- Populando Dados de Clientes e Contratos ---")
         seed_clientes_contratos(cursor)
+        print("--- Populando Dados de Políticas ---")
         seed_politicas(cursor)
 
         conn.commit()
-        print(f"✅ Banco de dados criado com sucesso em: {db_path}")
+        print(f"OK: banco de dados criado em: {db_path}")
         return db_path
     finally:
         conn.close()

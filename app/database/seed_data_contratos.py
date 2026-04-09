@@ -1,7 +1,6 @@
 CONTRATOS = [
     {
         "cpf": "12345678901",
-        "valor_contrato": 5000.00,
         "valor_original": 1000.00,
         "juros_acumulado": 50.00,
         "numero_parcelas": 24,
@@ -11,7 +10,6 @@ CONTRATOS = [
     },
     {
         "cpf": "98765432100",
-        "valor_contrato": 12000.00,
         "valor_original": 6000.00,
         "juros_acumulado": 150.00,
         "numero_parcelas": 24,
@@ -21,7 +19,6 @@ CONTRATOS = [
     },
     {
         "cpf": "11122233344",
-        "valor_contrato": 2500.00,
         "valor_original": 2500.00,
         "juros_acumulado": 1000.00,
         "numero_parcelas": 10,
