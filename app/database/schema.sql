@@ -3,8 +3,7 @@ CREATE TABLE IF NOT EXISTS clientes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     nome TEXT NOT NULL,
     cpf TEXT UNIQUE NOT NULL,
-    score INTEGER NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    score INTEGER NOT NULL
 );
 
 -- Tabela de Contrato
@@ -16,7 +15,7 @@ CREATE TABLE IF NOT EXISTS contratos (
     numero_parcelas INTEGER NOT NULL,
     parcelas_abertas INTEGER NOT NULL,
     dias_atraso INTEGER NOT NULL,
-    situacao TEXT DEFAULT 'ABERTO', -- ABERTO, ACORDADO, QUITADO
+    situacao TEXT DEFAULT 'ABERTO', -- ABERTO, RENEGOCIADO, QUITADO
     FOREIGN KEY (cliente_id) REFERENCES clientes (id)
 );
 

@@ -1,35 +1,38 @@
-import google.generativeai as genai
+import json
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_core.messages import SystemMessage
+import os
 from dotenv import load_dotenv
 
-load_dotenv()
+class AuditorAgent:
+    def __init__(self):
+        load_dotenv()
+        self.llm = ChatGoogleGenerativeAI(model=os.getenv("AGENT_MODEL_AUDITOR"), temperature=0)
 
-genai.configure(api_key=os.getenv("API_KEY"))
-model = genai.GenerativeModel(os.getenv("AGENT_MODEL_AUDITOR"))
+    def audit_proposal(self, negotiator_response, credit_limits):
+        """
+        Revisa a proposta antes de enviar ao cliente.
+        """
+        prompt = self._build_audit_prompt(negotiator_response, credit_limits)
+        
+        messages = [SystemMessage(content=prompt)]
+        
+        response = self.llm.invoke(messages)
+        
+        try:
+            # Tenta converter a string da LLM em um dicionário Python
+            # Em produçao, usaríamos PydanticOutputParser do LangChain
+            return json.loads(response.content.replace('```json', '').replace('```', ''))
+        except:
+            return {
+                "aprovado": False, 
+                "motivo_rejeicao": "Erro ao processar veredito do auditor.",
+                "risco_detectado": "alto"
+            }
 
-# --- 2. AGENTE AUDITOR (O "Cérebro" de Compliance) ---
-def agente_auditor(proposta_negociador, regras_originais):
-    """
-    Analisa se o negociador respeitou os limites da política.
-    Retorna True se aprovado, ou a razão da falha.
-    """
-    prompt_auditoria = f"""
-    Você é um Auditor de Compliance Bancário.
-    REGRAS RÍGIDAS: {regras_originais}
-    PROPOSTA DO NEGOCIADOR: "{proposta_negociador}"
-
-    TAREFA:
-    1. O desconto oferecido é MAIOR que o permitido?
-    2. O número de parcelas excede o permitido?
-    3. A linguagem é agressiva ou inadequada?
-
-    Responda APENAS em JSON no formato:
-    {{"aprovado": boolean, "motivo": "string", "correcao_sugerida": "string"}}
-    """
-    
-    # Configuração para garantir que o Gemini responda em JSON puro
-    response = model.generate_content(
-        prompt_auditoria, 
-        generation_config={"response_mime_type": "application/json"}
-    )
-    import json
-    return json.loads(response.text)
+    def _build_audit_prompt(self, response, limits):
+        return f"""
+        (Persona e Regras...)
+        LIMITES REAIS: {limits}
+        RESPOSTA DO NEGOCIADOR: "{response}"
+        """
