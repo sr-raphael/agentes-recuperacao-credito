@@ -1,10 +1,15 @@
 import sqlite3
 from pathlib import Path
+from typing import Any
 
 
 class DataContractPolicyAgent:
-    def __init__(self, db_path="app/database/credito.db"):
-        self.db_path = db_path
+    def __init__(self, db_path: str | Path | None = None):
+        if db_path is None:
+            self.db_path = Path(__file__).resolve().parent.parent / "database" / "credito.db"
+        else:
+            self.db_path = Path(db_path)
+
 
     def get_contract_data(self, cpf: str):
         conn = sqlite3.connect(self.db_path)
@@ -30,6 +35,7 @@ class DataContractPolicyAgent:
         data["nome"] = data["nome"].strip().split()[0]
         return data
 
+
     def get_policy_data(self, score: int, dias_atraso: int):
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
@@ -47,56 +53,69 @@ class DataContractPolicyAgent:
         
         return dict(result) if result else None
 
-    def get_contract_policy_data(self, cpf: str):
-        contract_data = self.get_contract_data(cpf)
 
+    def _build_limits(self, contract_data: dict[str, Any], policy_data: dict[str, Any]) -> dict[str, Any]:
+        vr_orig = float(contract_data["valor_original"])
+        juros = float(contract_data["juros_acumulado"])
+        perc_desc_max = float(policy_data["perc_desc_principal_max"]) / 100.0
+        juros_desc_max = float(policy_data["perc_desc_juros_max"]) / 100.0
+
+        def tier(mult: float) -> float:
+            desc_princ = vr_orig * perc_desc_max * mult
+            desc_juros = juros * juros_desc_max * mult
+            return vr_orig + juros - desc_princ - desc_juros
+
+        return {
+            "principal": vr_orig,
+            "juros": juros,
+            "proposta_1": round(tier(0.33), 2),
+            "proposta_2": round(tier(0.66), 2),
+            "proposta_3": round(tier(1.0), 2),
+        }
+
+    def get_client_limits(self, cpf: str) -> dict[str, Any] | None:
+        contract_data = self.get_contract_data(cpf)
+        if not contract_data:
+            return None
+
+        policy_data = self.get_policy_data(contract_data["score"], contract_data["dias_atraso"])
+        if not policy_data:
+            return None
+
+        limits = self._build_limits(contract_data, policy_data)
+        limits["contract_data"] = contract_data
+        limits["policy_data"] = policy_data
+        return limits
+
+
+    def get_contract_policy_data(self, cpf: str):
+        """
+        Retorna limites no formato esperado pelo Negociador (valores numéricos + faixas de proposta)
+        ou None se não houver contrato/política.
+        """
+
+        # 1. Obtém dados do cliente e contrato
+        contract_data = self.get_contract_data(cpf)
         if not contract_data:
             return {
                 "error": "Contract not found", 
                 "instruction": "Informe que no momento não foi possível encontrar um contrato ativo para o CPF informado"
                 }
 
+        # 2. Obtém dados de política de crédito
         policy_data = self.get_policy_data(contract_data["score"], contract_data["dias_atraso"])
-
         if not policy_data:
             return {
                 "error": "Negotiation policy not found", 
                 "instruction": "Informe que no momento não existe uma proposta de negociação para o contrato informado"
                 }
 
+        # 3. Gera propostas
+        proposal_limits = self._build_limits(contract_data, policy_data)
+
         return {
             "status": "success",	
             "contract_data": contract_data,
-            "policy_data": policy_data
+            "policy_data": policy_data,
+            "proposal_limits": proposal_limits,
             }
-
-    def get_client_limits(self, cpf: str):
-        """
-        Retorna limites no formato esperado pelo Negociador (valores numéricos + faixas de proposta)
-        ou None se não houver contrato/política.
-        """
-        bundle = self.get_contract_policy_data(cpf)
-        if bundle.get("error") or bundle.get("status") != "success":
-            return None
-        cd = bundle["contract_data"]
-        pd = bundle["policy_data"]
-        vo = float(cd["valor_original"])
-        ja = float(cd["juros_acumulado"])
-        pmax = float(pd["perc_desc_principal_max"]) / 100.0
-        jmax = float(pd["perc_desc_juros_max"]) / 100.0
-
-        def tier(mult: float) -> float:
-            desc_p = vo * pmax * mult
-            desc_j = ja * jmax * mult
-            return vo + ja - desc_p - desc_j
-
-        return {
-            "principal": vo,
-            "juros": ja,
-            "proposta_1": round(tier(0.33), 2),
-            "proposta_2": round(tier(0.66), 2),
-            "proposta_3": round(tier(1.0), 2),
-            "contract_data": cd,
-            "policy_data": pd,
-        }
-

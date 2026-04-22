@@ -1,14 +1,24 @@
-import os
-import google.generativeai as genai
+import logging
+
+import uvicorn
 from dotenv import load_dotenv
+from fastapi import FastAPI
+
+from app.api.deps import get_orchestrator
+from app.api.negotiation_rest import NegotiationRestApi
 
 load_dotenv()
-genai.configure(api_key=os.getenv("API_KEY"))
 
-# Usamos o Flash para velocidade e baixo custo na auditoria
-model = genai.GenerativeModel(os.getenv("AGENT_MODEL"))
+logging.basicConfig(level=logging.INFO)
+
+app = FastAPI(
+    title="AI Debt Negotiator API",
+    description="Sistema multi-agente para negociação de dívidas",
+    version="1.0.0",
+)
+
+NegotiationRestApi(get_orchestrator).mount(app)
 
 
-
-# Teste
-print(processar_negociacao("Preciso de 80% de desconto agora ou não pago."))
+if __name__ == "__main__":
+    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)

@@ -7,7 +7,12 @@ from dotenv import load_dotenv
 class AuditorAgent:
     def __init__(self):
         load_dotenv()
-        self.llm = ChatGoogleGenerativeAI(model=os.getenv("AGENT_MODEL_AUDITOR"), temperature=0)
+        model = os.getenv("AGENT_MODEL_AUDITOR") or "gemini-2.0-flash"
+        self.llm = ChatGoogleGenerativeAI(
+            model=model,
+            temperature=0,
+            google_api_key=os.getenv("API_KEY"),
+        )
 
     def audit_proposal(self, negotiator_response, credit_limits):
         """

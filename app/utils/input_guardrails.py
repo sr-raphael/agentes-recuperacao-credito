@@ -104,30 +104,12 @@ def _injection_heuristic(text: str) -> bool:
     return False
 
 
-def _history_total_and_max_item(chat_history: list | None) -> tuple[int, int]:
-    if not chat_history:
-        return 0, 0
-    total = 0
-    max_one = 0
-    for m in chat_history:
-        if hasattr(m, "content"):
-            chunk = str(getattr(m, "content", "") or "")
-        elif isinstance(m, dict):
-            chunk = str(m.get("content", "") or "")
-        else:
-            chunk = str(m)
-        total += len(chunk)
-        max_one = max(max_one, len(chunk))
-    return total, max_one
-
-
 def validate_debt_request(
     user_input: str,
     client_cpf: str,
-    chat_history: list | None = None,
 ) -> GuardrailResult:
     """
-    Valida mensagem do cliente, CPF e histórico antes de orquestrar agentes.
+    Valida mensagem do cliente e CPF antes de orquestrar agentes.
 
     Em caso de bloqueio, a mensagem ao usuário é intencionalmente genérica
     para não facilitar tuning de ataques.
@@ -168,13 +150,6 @@ def validate_debt_request(
             sanitized_input="",
             cpf_digits="",
         )
-
-    if chat_history is not None:
-        if len(chat_history) > MAX_CHAT_HISTORY_ITEMS:
-            return GuardrailResult(ok=False, user_message=generic, sanitized_input="", cpf_digits="")
-        total_chars, max_item = _history_total_and_max_item(chat_history)
-        if total_chars > MAX_CHAT_HISTORY_TOTAL_CHARS or max_item > MAX_SINGLE_HISTORY_MESSAGE_CHARS:
-            return GuardrailResult(ok=False, user_message=generic, sanitized_input="", cpf_digits="")
 
     return GuardrailResult(
         ok=True,

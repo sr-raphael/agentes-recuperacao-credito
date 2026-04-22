@@ -1,6 +1,6 @@
 CONTRATOS = [
     {
-        "cpf": "12345678901",
+        "cpf": "59126335000",
         "valor_original": 1000.00,
         "juros_acumulado": 50.00,
         "numero_parcelas": 24,
@@ -9,7 +9,7 @@ CONTRATOS = [
         "situacao": "ABERTO",
     },
     {
-        "cpf": "98765432100",
+        "cpf": "40591273020",
         "valor_original": 6000.00,
         "juros_acumulado": 150.00,
         "numero_parcelas": 24,
@@ -18,7 +18,7 @@ CONTRATOS = [
         "situacao": "ABERTO",
     },
     {
-        "cpf": "11122233344",
+        "cpf": "66710722058",
         "valor_original": 2500.00,
         "juros_acumulado": 1000.00,
         "numero_parcelas": 10,

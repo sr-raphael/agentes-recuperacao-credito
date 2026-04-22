@@ -1,5 +1,13 @@
-google-generativeai==0.8.6
+# --- Ambiente e configuração ---
 python-dotenv==1.2.1
+
+# --- Modelos / validação (domínio + FastAPI) ---
 pydantic==2.12.5
+
+# --- API (servidor HTTP) ---
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+
+# --- Agentes (LangChain + Gemini) ---
 langchain-core>=0.3.0
 langchain-google-genai>=2.0.0

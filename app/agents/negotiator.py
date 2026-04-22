@@ -1,12 +1,31 @@
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 import os
 from dotenv import load_dotenv
+
+
+def _to_lc_message(msg) -> BaseMessage:
+    if isinstance(msg, BaseMessage):
+        return msg
+    if isinstance(msg, dict):
+        role = (msg.get("role") or "user").lower()
+        content = str(msg.get("content") or "")
+        return AIMessage(content=content) if role == "assistant" else HumanMessage(content=content)
+    role = (getattr(msg, "role", None) or "user").lower()
+    content = str(getattr(msg, "content", "") or "")
+    return AIMessage(content=content) if role == "assistant" else HumanMessage(content=content)
+
 
 class NegotiatorAgent:
     def __init__(self):
         load_dotenv()
-        self.llm = ChatGoogleGenerativeAI(model=os.getenv("AGENT_MODEL_NEGOCIATOR"), temperature=0.7)
+        api_key = os.getenv("API_KEY")
+        model = os.getenv("AGENT_MODEL_NEGOCIATOR") or "gemini-2.0-flash"
+        self.llm = ChatGoogleGenerativeAI(
+            model=model,
+            temperature=0.7,
+            google_api_key=api_key,
+        )
 
     def generate_response(self, user_message, credit_context, chat_history):
         """
@@ -20,9 +39,9 @@ class NegotiatorAgent:
         
         messages = [SystemMessage(content=system_prompt)]
         
-        # Adiciona o histórico (limite de 5 últimas para não estourar contexto)
-        for msg in chat_history[-5:]:
-            messages.append(msg)
+        hist = chat_history or []
+        for msg in hist[-5:]:
+            messages.append(_to_lc_message(msg))
             
         messages.append(HumanMessage(content=user_message))
         
