@@ -157,3 +157,38 @@ def validate_debt_request(
         sanitized_input=sanitized,
         cpf_digits=cpf,
     )
+
+
+def validate_chat_history(chat_history: list | None) -> GuardrailResult:
+    """Valida o histórico enviado pelo cliente (stateless por requisição)."""
+    generic = (
+        "Não foi possível processar o histórico da conversa. "
+        "Envie apenas as últimas mensagens ou inicie um novo atendimento."
+    )
+    if not chat_history:
+        return GuardrailResult(ok=True, user_message="", sanitized_input="", cpf_digits="")
+
+    if len(chat_history) > MAX_CHAT_HISTORY_ITEMS:
+        return GuardrailResult(ok=False, user_message=generic)
+
+    total_chars = 0
+    for item in chat_history:
+        if isinstance(item, dict):
+            role = str(item.get("role") or "").lower()
+            content = _normalize_text(str(item.get("content") or ""))
+        else:
+            role = str(getattr(item, "role", "") or "").lower()
+            content = _normalize_text(str(getattr(item, "content", "") or ""))
+
+        if role not in ("user", "assistant"):
+            return GuardrailResult(ok=False, user_message=generic)
+        if not content or len(content) > MAX_SINGLE_HISTORY_MESSAGE_CHARS:
+            return GuardrailResult(ok=False, user_message=generic)
+        if _injection_heuristic(content):
+            return GuardrailResult(ok=False, user_message=generic)
+
+        total_chars += len(content)
+        if total_chars > MAX_CHAT_HISTORY_TOTAL_CHARS:
+            return GuardrailResult(ok=False, user_message=generic)
+
+    return GuardrailResult(ok=True, user_message="", sanitized_input="", cpf_digits="")

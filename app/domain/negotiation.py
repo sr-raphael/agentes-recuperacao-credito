@@ -6,11 +6,17 @@ class ChatMessage(BaseModel):
     role: str = Field(..., description="user ou assistant")
     content: str = Field(..., description="Texto da mensagem")
 
+
 class NegotiationRequest(BaseModel):
     """Entrada da rota de negociação: identificação do cliente e última interação."""
 
     cpf: str = Field(..., description="CPF do cliente (com ou sem máscara)")
     mensagem: str = Field(..., description="Última mensagem do usuário na conversa")
+    historico: list[ChatMessage] = Field(
+        default_factory=list,
+        description="Mensagens anteriores (user/assistant), em ordem cronológica",
+    )
+
 
 class NegotiationResponse(BaseModel):
     """Saída da negociação após orquestrador + auditor."""

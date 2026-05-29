@@ -8,6 +8,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 
 _AUDITOR_PROMPT_PATH = Path(__file__).resolve().parent / "prompts" / "auditor_prompt.txt"
 
+
 class AuditorAgent:
     def __init__(self):
         load_dotenv()
@@ -33,16 +34,15 @@ class AuditorAgent:
         # Gemini exige ao menos uma mensagem de usuário com conteúdo (só SystemMessage falha).
         messages = [HumanMessage(content=prompt)]
         response = self.llm.invoke(messages)
-        
+
         try:
-            # Tenta converter a string da LLM em um dicionário Python
-            # Em produçao, usaríamos PydanticOutputParser do LangChain
-            return json.loads(response.content.replace('```json', '').replace('```', ''))
-        except:
+            raw = response.content.replace("```json", "").replace("```", "")
+            return json.loads(raw)
+        except (json.JSONDecodeError, TypeError, AttributeError):
             return {
-                "aprovado": False, 
+                "aprovado": False,
                 "motivo_rejeicao": "Erro ao processar veredito do auditor.",
-                "risco_detectado": "alto"
+                "risco_detectado": "alto",
             }
 
     def _build_audit_prompt(self, response, limits: dict) -> str:

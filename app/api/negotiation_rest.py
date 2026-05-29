@@ -24,7 +24,6 @@ class NegotiationRestApi:
         self._register_routes()
 
     def _register_routes(self) -> None:
-        
         @self.router.get("/", response_model=ServiceHealthResponse)
         async def root() -> ServiceHealthResponse:
             return ServiceHealthResponse(
@@ -34,14 +33,13 @@ class NegotiationRestApi:
 
         @self.router.post("/v1/negociar", response_model=NegotiationResponse)
         async def negociar(request: NegotiationRequest) -> NegotiationResponse:
-            """ Endpoint único de interação entre o usuário e o sistema multi-agente.
-                Orquestra: contexto → negociador → auditor.
-            """
+            """Interação com o sistema multi-agente (contexto → negociador → auditor)."""
             try:
                 coordinator = self._get_coordinator()
                 resultado = coordinator.run(
                     user_input=request.mensagem,
                     client_cpf=request.cpf,
+                    chat_history=request.historico,
                 )
                 return NegotiationResponse(
                     resposta=resultado["texto"],
