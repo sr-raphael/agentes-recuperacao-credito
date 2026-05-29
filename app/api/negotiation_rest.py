@@ -24,8 +24,8 @@ class NegotiationRestApi:
         self._register_routes()
 
     def _register_routes(self) -> None:
-        @self.router.get("/", response_model=ServiceHealthResponse)
-        async def root() -> ServiceHealthResponse:
+        @self.router.get("/health", response_model=ServiceHealthResponse)
+        async def health() -> ServiceHealthResponse:
             return ServiceHealthResponse(
                 status="online",
                 message="Debt Negotiator Multi-Agent System",

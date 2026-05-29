@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Negociação de Dívida</title>
+    <link rel="stylesheet" href="/static/chat/styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="header">
+        <div class="header-main">
+          <h1>Atendimento — Recuperação de Crédito</h1>
+          <p class="subtitle">Simulador de conversa com o agente negociador</p>
+        </div>
+        <label class="cpf-field">
+          <span>CPF</span>
+          <input
+            id="cpf-input"
+            type="text"
+            inputmode="numeric"
+            maxlength="14"
+            placeholder="000.000.000-00"
+            value="12345678901"
+            autocomplete="off"
+          />
+        </label>
+        <button type="button" id="btn-clear" class="btn-secondary" title="Nova conversa">
+          Limpar
+        </button>
+      </header>
+
+      <main id="messages" class="messages" aria-live="polite"></main>
+
+      <div id="typing" class="typing hidden" aria-hidden="true">
+        <span></span><span></span><span></span>
+        Agente digitando…
+      </div>
+
+      <footer class="composer">
+        <form id="chat-form">
+          <textarea
+            id="message-input"
+            rows="1"
+            placeholder="Digite sua mensagem…"
+            maxlength="4000"
+            required
+          ></textarea>
+          <button type="submit" id="btn-send" aria-label="Enviar">
+            <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+              <path
+                fill="currentColor"
+                d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"
+              />
+            </svg>
+          </button>
+        </form>
+      </footer>
+    </div>
+
+    <script src="/static/chat/app.js"></script>
+  </body>
+</html>

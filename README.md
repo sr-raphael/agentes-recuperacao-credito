@@ -11,3 +11,8 @@ py ./app/database/seed_db.py
 
 4. Executa projeto
 uvicorn app.main:app --reload
+
+5. Abre o chat no navegador
+http://127.0.0.1:8000/chat
+
+API: POST /v1/negociar · Health: GET /health · Docs: /docs
