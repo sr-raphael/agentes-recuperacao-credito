@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Any
 
 
-class DataContractPolicyAgent:
+class CreditAnalystAgent:
     def __init__(self, db_path: str | Path | None = None):
         if db_path is None:
             self.db_path = Path(__file__).resolve().parent.parent / "database" / "credito.db"
@@ -54,7 +54,7 @@ class DataContractPolicyAgent:
         return dict(result) if result else None
 
 
-    def _build_limits(self, contract_data: dict[str, Any], policy_data: dict[str, Any]) -> dict[str, Any]:
+    def get_credit_limits(self, contract_data: dict[str, Any], policy_data: dict[str, Any]) -> dict[str, Any] | None:
         vr_orig = float(contract_data["valor_original"])
         juros = float(contract_data["juros_acumulado"])
         perc_desc_max = float(policy_data["perc_desc_principal_max"]) / 100.0
@@ -73,22 +73,8 @@ class DataContractPolicyAgent:
             "proposta_3": round(tier(1.0), 2),
         }
 
-    def get_client_limits(self, cpf: str) -> dict[str, Any] | None:
-        contract_data = self.get_contract_data(cpf)
-        if not contract_data:
-            return None
 
-        policy_data = self.get_policy_data(contract_data["score"], contract_data["dias_atraso"])
-        if not policy_data:
-            return None
-
-        limits = self._build_limits(contract_data, policy_data)
-        limits["contract_data"] = contract_data
-        limits["policy_data"] = policy_data
-        return limits
-
-
-    def get_contract_policy_data(self, cpf: str):
+    def get_credit_analyst_data(self, cpf: str):
         """
         Retorna limites no formato esperado pelo Negociador (valores numéricos + faixas de proposta)
         ou None se não houver contrato/política.
@@ -110,8 +96,8 @@ class DataContractPolicyAgent:
                 "instruction": "Informe que no momento não existe uma proposta de negociação para o contrato informado"
                 }
 
-        # 3. Gera propostas
-        proposal_limits = self._build_limits(contract_data, policy_data)
+        # 3. Gera faixas de propostas
+        proposal_limits = self.get_credit_limits(contract_data, policy_data)
 
         return {
             "status": "success",	

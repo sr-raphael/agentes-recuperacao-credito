@@ -4,7 +4,7 @@ import uvicorn
 from dotenv import load_dotenv
 from fastapi import FastAPI
 
-from app.api.deps import get_orchestrator
+from app.api.deps import get_coordinator
 from app.api.negotiation_rest import NegotiationRestApi
 
 load_dotenv()
@@ -17,7 +17,7 @@ app = FastAPI(
     version="1.0.0",
 )
 
-NegotiationRestApi(get_orchestrator).mount(app)
+NegotiationRestApi(get_coordinator).mount(app)
 
 
 if __name__ == "__main__":

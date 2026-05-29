@@ -2,16 +2,16 @@ from pathlib import Path
 
 from app.agents.negotiator import NegotiatorAgent
 from app.agents.auditor import AuditorAgent
-from app.tools.contract_policy_data import DataContractPolicyAgent
+from app.agents.credit_analyst import CreditAnalystAgent
 from app.utils.input_guardrails import validate_debt_request
 
 
-class DebtOrchestrator:
+class CoordinatorAgent:
     def __init__(self, db_path: str | Path | None = None):
         self.db_path = db_path
         self.negotiator = NegotiatorAgent()
         self.auditor = AuditorAgent()
-        self.contract_policy_data = DataContractPolicyAgent(db_path)
+        self.credit_analyst = CreditAnalystAgent(db_path)
 
 
     def run(self, user_input, client_cpf):
@@ -29,11 +29,13 @@ class DebtOrchestrator:
         client_cpf = guard.cpf_digits
 
         # 1. Consulta políticas de crédito e situação financeira do cliente
-        contexto_financeiro = self.contract_policy_data.get_contract_policy_data(client_cpf)
+        contexto_financeiro = self.credit_analyst.get_credit_analyst_data(client_cpf)
         
-        if not contexto_financeiro:
+        if not contexto_financeiro or contexto_financeiro.get("error"):
             return {
-                "texto": "Desculpe, não consegui localizar seus dados para negociação.",
+                "texto": contexto_financeiro.get("instruction")
+                if contexto_financeiro and contexto_financeiro.get("instruction")
+                else "Desculpe, não consegui localizar seus dados para negociação.",
                 "auditoria_status": "cadastro_nao_encontrado",
             }
 

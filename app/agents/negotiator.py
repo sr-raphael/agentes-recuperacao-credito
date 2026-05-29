@@ -51,7 +51,8 @@ class NegotiatorAgent:
     def generate_safe_fallback(self, context):
         """Resposta determinística quando o auditor bloqueia a saída do modelo."""
         try:
-            p1 = float(context.get("proposta_1", 0))
+            limits = context.get("proposal_limits") or context
+            p1 = float(limits.get("proposta_1", 0))
             return (
                 "Neste canal não consigo repetir a proposta anterior. "
                 "Posso seguir com a faixa conservadora já autorizada "
@@ -64,15 +65,27 @@ class NegotiatorAgent:
                 "Um atendente dará continuidade à sua negociação com segurança."
             )
 
-    def _build_system_prompt(self, context):
-        # Aqui injetamos o Markdown do prompt que definimos acima
-        # Formatando os limites da Tool para o texto do prompt
+    def _build_system_prompt(self, context: dict) -> str:
+        contract = context.get("contract_data") or {}
+        limits = context.get("proposal_limits") or {}
+
+        nome = contract.get("nome", "Cliente")
+        score = contract.get("score", "—")
+        dias_atraso = contract.get("dias_atraso", "—")
+        situacao = contract.get("situacao", "—")
+
         return f"""
         (Persona e Diretrizes...)
-        CONTEXTO ATUAL DA DÍVIDA:
-        - Valor Principal: R$ {context['principal']}
-        - Juros Acumulados: R$ {context['juros']}
-        - Proposta Inicial (Conservadora): {context['proposta_1']}
-        - Proposta Intermediária: {context['proposta_2']}
-        - Limite Final (Crítico): {context['proposta_3']}
+        DADOS DO CONTRATO (contract_data):
+        - Nome: {nome}
+        - Score: {score}
+        - Dias em atraso: {dias_atraso}
+        - Situação: {situacao}
+
+        CONTEXTO ATUAL DA DÍVIDA (proposal_limits):
+        - Valor Principal: R$ {contract.get('valor_original', 0)}
+        - Juros Acumulados: R$ {contract.get('juros_acumulado', 0)}
+        - Proposta Inicial (Conservadora): {limits.get('proposta_1')}
+        - Proposta Intermediária: {limits.get('proposta_2')}
+        - Limite Final (Crítico): {limits.get('proposta_3')}
         """

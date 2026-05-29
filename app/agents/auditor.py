@@ -1,8 +1,12 @@
 import json
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_core.messages import SystemMessage
 import os
+from pathlib import Path
+
 from dotenv import load_dotenv
+from langchain_core.messages import HumanMessage
+from langchain_google_genai import ChatGoogleGenerativeAI
+
+_AUDITOR_PROMPT_PATH = Path(__file__).resolve().parent / "prompts" / "auditor_prompt.txt"
 
 class AuditorAgent:
     def __init__(self):
@@ -19,9 +23,15 @@ class AuditorAgent:
         Revisa a proposta antes de enviar ao cliente.
         """
         prompt = self._build_audit_prompt(negotiator_response, credit_limits)
-        
-        messages = [SystemMessage(content=prompt)]
-        
+        if not (prompt and prompt.strip()):
+            return {
+                "aprovado": False,
+                "motivo_rejeicao": "Prompt de auditoria vazio.",
+                "risco_detectado": "alto",
+            }
+
+        # Gemini exige ao menos uma mensagem de usuário com conteúdo (só SystemMessage falha).
+        messages = [HumanMessage(content=prompt)]
         response = self.llm.invoke(messages)
         
         try:
@@ -35,9 +45,13 @@ class AuditorAgent:
                 "risco_detectado": "alto"
             }
 
-    def _build_audit_prompt(self, response, limits):
-        return f"""
-        (Persona e Regras...)
-        LIMITES REAIS: {limits}
-        RESPOSTA DO NEGOCIADOR: "{response}"
-        """
+    def _build_audit_prompt(self, response, limits: dict) -> str:
+        limits_view = {
+            "proposal_limits": limits.get("proposal_limits") or {},
+            "policy_data": limits.get("policy_data") or {},
+        }
+        template = _AUDITOR_PROMPT_PATH.read_text(encoding="utf-8")
+        return template.format(
+            limites_tool=json.dumps(limits_view, ensure_ascii=False, indent=2),
+            resposta_negociador=str(response or ""),
+        )

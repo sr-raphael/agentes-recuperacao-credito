@@ -3,7 +3,7 @@ from collections.abc import Callable
 
 from fastapi import APIRouter, FastAPI, HTTPException
 
-from app.engine.orchestrator import DebtOrchestrator
+from app.agents.coordinator import CoordinatorAgent
 from app.domain.health import ServiceHealthResponse
 from app.domain.negotiation import NegotiationRequest, NegotiationResponse
 
@@ -17,9 +17,9 @@ class NegotiationRestApi:
 
     def __init__(
         self,
-        orchestrator_factory: Callable[[], DebtOrchestrator],
+        coordinator_factory: Callable[[], CoordinatorAgent],
     ) -> None:
-        self._get_orchestrator = orchestrator_factory
+        self._get_coordinator = coordinator_factory
         self.router = APIRouter(tags=["negociacao"])
         self._register_routes()
 
@@ -38,8 +38,8 @@ class NegotiationRestApi:
                 Orquestra: contexto → negociador → auditor.
             """
             try:
-                orchestrator = self._get_orchestrator()
-                resultado = orchestrator.run(
+                coordinator = self._get_coordinator()
+                resultado = coordinator.run(
                     user_input=request.mensagem,
                     client_cpf=request.cpf,
                 )
