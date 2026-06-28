@@ -15,11 +15,13 @@ uvicorn app.main:app --reload
 5. Abre o chat no navegador
 http://127.0.0.1:8000/chat
 
-API: POST /v1/negociar · GET/DELETE /v1/negociar/sessoes · Health: GET /health · Docs: /docs
+API: POST /v1/auth/login · POST /v1/negociar (Bearer) · GET/DELETE /v1/negociar/sessoes · Docs: /docs
 
-Limpar sessões de um CPF:
+Login no chat: CPF do seed + senha do cliente (padrão no seed: `12345`).
+
 ```http
-DELETE /v1/negociar/sessoes?cpf=66710722058
+POST /v1/auth/login
+{"cpf":"66710722058","senha":"12345"}
 ```
 
 Consultar histórico no SQLite:

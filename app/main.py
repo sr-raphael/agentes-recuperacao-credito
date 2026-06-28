@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
+from app.api.auth_rest import router as auth_router
 from app.api.deps import get_coordinator
 from app.api.negotiation_rest import NegotiationRestApi
 
@@ -23,6 +24,7 @@ app = FastAPI(
 CHAT_STATIC_DIR = Path(__file__).resolve().parent / "static" / "chat"
 app.mount("/static/chat", StaticFiles(directory=str(CHAT_STATIC_DIR)), name="chat-static")
 
+app.include_router(auth_router)
 NegotiationRestApi(get_coordinator).mount(app)
 
 

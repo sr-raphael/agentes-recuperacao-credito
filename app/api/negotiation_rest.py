@@ -2,7 +2,7 @@ import logging
 import re
 from collections.abc import Callable
 
-from fastapi import APIRouter, FastAPI, HTTPException, Query
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query
 
 from app.agents.coordinator import CoordinatorAgent
 from app.domain.health import ServiceHealthResponse
@@ -15,6 +15,7 @@ from app.domain.negotiation import (
     NegotiationSessionSummary,
     NegotiationSessionsResponse,
 )
+from app.security.jwt_auth import assert_cpf_matches_token, get_current_cpf
 
 logger = logging.getLogger(__name__)
 
@@ -43,13 +44,19 @@ class NegotiationRestApi:
             )
 
         @self.router.post("/v1/negociar", response_model=NegotiationResponse)
-        async def negociar(request: NegotiationRequest) -> NegotiationResponse:
+        async def negociar(
+            request: NegotiationRequest,
+            token_cpf: str = Depends(get_current_cpf),
+        ) -> NegotiationResponse:
             """Interação com o sistema multi-agente (contexto → negociador → auditor)."""
+            cpf_digits = _cpf_digits(request.cpf)
+            assert_cpf_matches_token(token_cpf, cpf_digits)
+
             try:
                 coordinator = self._get_coordinator()
                 resultado = coordinator.run(
                     user_input=request.mensagem,
-                    client_cpf=request.cpf,
+                    client_cpf=cpf_digits,
                     chat_history=request.historico,
                     session_id=request.session_id,
                 )
@@ -72,14 +79,17 @@ class NegotiationRestApi:
         async def obter_historico(
             cpf: str = Query(..., description="CPF do cliente"),
             session_id: str = Query(..., description="ID da sessão de chat"),
+            token_cpf: str = Depends(get_current_cpf),
         ) -> NegotiationHistoryResponse:
             cpf_digits = _cpf_digits(cpf)
             if len(cpf_digits) != 11:
                 raise HTTPException(status_code=400, detail="CPF inválido.")
+            assert_cpf_matches_token(token_cpf, cpf_digits)
 
             coordinator = self._get_coordinator()
-            store = coordinator.history_store
-            mensagens = store.get_session_transcript(cpf_digits, session_id.strip())
+            mensagens = coordinator.history_store.get_session_transcript(
+                cpf_digits, session_id.strip()
+            )
             if mensagens is None:
                 mensagens = []
 
@@ -93,10 +103,12 @@ class NegotiationRestApi:
         async def listar_sessoes(
             cpf: str = Query(..., description="CPF do cliente"),
             limit: int = Query(20, ge=1, le=100),
+            token_cpf: str = Depends(get_current_cpf),
         ) -> NegotiationSessionsResponse:
             cpf_digits = _cpf_digits(cpf)
             if len(cpf_digits) != 11:
                 raise HTTPException(status_code=400, detail="CPF inválido.")
+            assert_cpf_matches_token(token_cpf, cpf_digits)
 
             coordinator = self._get_coordinator()
             rows = coordinator.history_store.list_sessions(cpf_digits, limit=limit)
@@ -108,11 +120,13 @@ class NegotiationRestApi:
         @self.router.delete("/v1/negociar/sessoes", response_model=ClearSessionsResponse)
         async def limpar_sessoes(
             cpf: str = Query(..., description="CPF do cliente"),
+            token_cpf: str = Depends(get_current_cpf),
         ) -> ClearSessionsResponse:
             """Apaga todas as sessões de chat persistidas para o CPF informado."""
             cpf_digits = _cpf_digits(cpf)
             if len(cpf_digits) != 11:
                 raise HTTPException(status_code=400, detail="CPF inválido.")
+            assert_cpf_matches_token(token_cpf, cpf_digits)
 
             coordinator = self._get_coordinator()
             result = coordinator.history_store.clear_all_sessions(cpf_digits)

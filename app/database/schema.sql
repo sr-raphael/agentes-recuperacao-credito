@@ -3,7 +3,8 @@ CREATE TABLE IF NOT EXISTS clientes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     nome TEXT NOT NULL,
     cpf TEXT UNIQUE NOT NULL,
-    score INTEGER NOT NULL
+    score INTEGER NOT NULL,
+    senha_hash TEXT NOT NULL
 );
 
 -- Tabela de Contrato

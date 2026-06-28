@@ -21,13 +21,22 @@
             inputmode="numeric"
             maxlength="14"
             placeholder="000.000.000-00"
-            value="12345678901"
-            autocomplete="off"
+            autocomplete="username"
           />
         </label>
-        <button type="button" id="btn-clear" class="btn-secondary" title="Nova conversa">
-          Limpar
-        </button>
+        <label class="cpf-field">
+          <span>Senha</span>
+          <input
+            id="senha-input"
+            type="password"
+            placeholder="Senha de acesso"
+            autocomplete="current-password"
+          />
+        </label>
+        <div class="header-actions">
+          <button type="button" id="btn-entrar" class="btn-primary">Entrar</button>
+          <button type="button" id="btn-sair" class="btn-secondary" disabled>Sair</button>
+        </div>
       </header>
 
       <main id="messages" class="messages" aria-live="polite"></main>

@@ -1,5 +1,10 @@
 import sqlite3
+import sys
 from pathlib import Path
+
+_ROOT = Path(__file__).resolve().parent.parent.parent
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
 
 try:
     from .seed_data_clientes import CLIENTES
@@ -10,14 +15,23 @@ except ImportError:
     from seed_data_contratos import CONTRATOS
     from seed_data_politicas import POLITICAS
 
-
 def seed_clientes_contratos(cursor: sqlite3.Cursor) -> None:
     cliente_ids_por_cpf: dict[str, int] = {}
 
     for cliente in CLIENTES:
+        senha_hash = cliente.get("senha_hash")
+        if not senha_hash:
+            raise ValueError(
+                f"Cliente {cliente.get('cpf')} sem senha_hash no seed_data_clientes"
+            )
         cursor.execute(
-            "INSERT INTO clientes (nome, cpf, score) VALUES (?, ?, ?)",
-            (cliente["nome"], cliente["cpf"], int(cliente["score"])),
+            "INSERT INTO clientes (nome, cpf, score, senha_hash) VALUES (?, ?, ?, ?)",
+            (
+                cliente["nome"],
+                cliente["cpf"],
+                int(cliente["score"]),
+                senha_hash,
+            ),
         )
         cliente_ids_por_cpf[str(cliente["cpf"])] = int(cursor.lastrowid)
 

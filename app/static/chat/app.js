@@ -1,19 +1,24 @@
 const API_URL = "/v1/negociar";
 const HISTORY_URL = "/v1/negociar/historico";
 const SESSIONS_URL = "/v1/negociar/sessoes";
+const LOGIN_URL = "/v1/auth/login";
 const SESSION_STORAGE_KEY = "chat_session_id";
+const TOKEN_STORAGE_KEY = "chat_access_token";
 
 const messagesEl = document.getElementById("messages");
 const formEl = document.getElementById("chat-form");
 const inputEl = document.getElementById("message-input");
 const cpfEl = document.getElementById("cpf-input");
+const senhaEl = document.getElementById("senha-input");
 const btnSend = document.getElementById("btn-send");
-const btnClear = document.getElementById("btn-clear");
+const btnEntrar = document.getElementById("btn-entrar");
+const btnSair = document.getElementById("btn-sair");
 const typingEl = document.getElementById("typing");
 
 /** @type {{ role: 'user' | 'assistant', content: string }[]} */
 let historico = [];
 let sessionId = localStorage.getItem(SESSION_STORAGE_KEY) || crypto.randomUUID();
+let accessToken = localStorage.getItem(TOKEN_STORAGE_KEY) || "";
 
 function onlyDigits(value) {
   return (value || "").replace(/\D/g, "");
@@ -27,9 +32,38 @@ function persistSessionId() {
   localStorage.setItem(SESSION_STORAGE_KEY, sessionId);
 }
 
+function persistToken() {
+  if (accessToken) {
+    localStorage.setItem(TOKEN_STORAGE_KEY, accessToken);
+  } else {
+    localStorage.removeItem(TOKEN_STORAGE_KEY);
+  }
+}
+
 function newSession() {
   sessionId = crypto.randomUUID();
   persistSessionId();
+}
+
+function authHeaders(extra = {}) {
+  const headers = { ...extra };
+  if (accessToken) {
+    headers.Authorization = `Bearer ${accessToken}`;
+  }
+  return headers;
+}
+
+function isAuthenticated() {
+  return Boolean(accessToken);
+}
+
+function setAuthenticatedUI(loggedIn) {
+  btnEntrar.disabled = loggedIn;
+  btnSair.disabled = !loggedIn;
+  cpfEl.disabled = loggedIn;
+  senhaEl.disabled = loggedIn;
+  inputEl.disabled = !loggedIn;
+  btnSend.disabled = !loggedIn;
 }
 
 function scrollToBottom() {
@@ -82,20 +116,26 @@ function renderHistorico(messages) {
 }
 
 function setLoading(loading) {
-  btnSend.disabled = loading;
-  inputEl.disabled = loading;
-  cpfEl.disabled = loading;
+  btnSend.disabled = loading || !isAuthenticated();
+  inputEl.disabled = loading || !isAuthenticated();
   typingEl.classList.toggle("hidden", !loading);
   typingEl.setAttribute("aria-hidden", loading ? "false" : "true");
 }
 
 async function loadSessionFromServer() {
+  if (!isAuthenticated()) return;
+
   const cpf = onlyDigits(cpfEl.value);
   if (cpf.length !== 11) return;
 
   try {
     const params = new URLSearchParams({ cpf, session_id: sessionId });
-    const res = await fetch(`${HISTORY_URL}?${params}`);
+    const res = await fetch(`${HISTORY_URL}?${params}`, { headers: authHeaders() });
+    if (res.status === 401) {
+      logout();
+      appendSystem("Sessão expirada. Faça login novamente.", true);
+      return;
+    }
     if (!res.ok) return;
 
     const data = await res.json();
@@ -112,7 +152,102 @@ async function loadSessionFromServer() {
   }
 }
 
+async function login() {
+  const cpf = onlyDigits(cpfEl.value);
+  const senha = (senhaEl.value || "").trim();
+
+  if (cpf.length !== 11) {
+    appendSystem("Informe um CPF válido com 11 dígitos.", true);
+    return;
+  }
+  if (!senha) {
+    appendSystem("Informe a senha para entrar.", true);
+    return;
+  }
+
+  btnEntrar.disabled = true;
+  try {
+    const res = await fetch(LOGIN_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cpf, senha }),
+    });
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      const detail =
+        typeof data.detail === "string"
+          ? data.detail
+          : "Não foi possível autenticar. Verifique CPF e senha.";
+      appendSystem(detail, true);
+      return;
+    }
+
+    accessToken = data.access_token || "";
+    persistToken();
+    if (data.cpf) {
+      cpfEl.value = data.cpf;
+    }
+
+    historico = [];
+    clearMessagesUi();
+    newSession();
+    setAuthenticatedUI(true);
+    senhaEl.value = "";
+
+    const horas = Math.round((data.expires_in || 3600) / 3600);
+    appendSystem(
+      `Autenticado com sucesso. Token válido por ${horas} hora(s). Envie uma mensagem para começar.`
+    );
+    await loadSessionFromServer();
+  } catch {
+    appendSystem("Erro de conexão ao autenticar.", true);
+  } finally {
+    if (!isAuthenticated()) {
+      btnEntrar.disabled = false;
+    }
+  }
+}
+
+function logout() {
+  accessToken = "";
+  persistToken();
+  historico = [];
+  clearMessagesUi();
+  newSession();
+  setAuthenticatedUI(false);
+}
+
+async function sair() {
+  const cpf = onlyDigits(cpfEl.value);
+
+  if (cpf.length === 11 && isAuthenticated()) {
+    try {
+      const params = new URLSearchParams({ cpf });
+      await fetch(`${SESSIONS_URL}?${params}`, {
+        method: "DELETE",
+        headers: authHeaders(),
+      });
+    } catch {
+      /* segue logout local */
+    }
+  }
+
+  accessToken = "";
+  persistToken();
+  historico = [];
+  clearMessagesUi();
+  newSession();
+  setAuthenticatedUI(false);
+  appendSystem("Você saiu. Histórico local limpo.");
+}
+
 async function sendMessage(text) {
+  if (!isAuthenticated()) {
+    appendSystem("Faça login (Entrar) antes de enviar mensagens.", true);
+    return;
+  }
+
   const cpf = onlyDigits(cpfEl.value);
   if (cpf.length !== 11) {
     appendSystem("Informe um CPF válido com 11 dígitos.", true);
@@ -126,7 +261,7 @@ async function sendMessage(text) {
   try {
     const res = await fetch(API_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({
         cpf,
         mensagem: text,
@@ -136,6 +271,13 @@ async function sendMessage(text) {
     });
 
     const data = await res.json().catch(() => ({}));
+
+    if (res.status === 401) {
+      historico.pop();
+      logout();
+      appendSystem("Token expirado ou inválido. Faça login novamente.", true);
+      return;
+    }
 
     if (!res.ok) {
       historico.pop();
@@ -192,30 +334,24 @@ inputEl.addEventListener("input", () => {
   inputEl.style.height = `${Math.min(inputEl.scrollHeight, 120)}px`;
 });
 
-cpfEl.addEventListener("change", () => {
-  loadSessionFromServer();
-});
-
-btnClear.addEventListener("click", async () => {
-  const cpf = onlyDigits(cpfEl.value);
-  historico = [];
-  clearMessagesUi();
-  newSession();
-
-  if (cpf.length === 11) {
-    try {
-      const params = new URLSearchParams({ cpf });
-      await fetch(`${SESSIONS_URL}?${params}`, { method: "DELETE" });
-    } catch {
-      /* limpa só a UI se a API falhar */
-    }
+senhaEl.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    login();
   }
-
-  appendSystem("Nova conversa iniciada. Envie uma mensagem para começar.");
 });
+
+btnEntrar.addEventListener("click", () => login());
+btnSair.addEventListener("click", () => sair());
 
 persistSessionId();
-appendSystem(
-  "Bem-vindo. Use o CPF de teste do seed (ex.: 12345678901) e digite sua mensagem."
-);
-loadSessionFromServer();
+setAuthenticatedUI(isAuthenticated());
+
+if (isAuthenticated()) {
+  appendSystem("Sessão restaurada. Você já está autenticado.");
+  loadSessionFromServer();
+} else {
+  appendSystem(
+    "Informe CPF e senha do cliente (seed: 12345) e clique em Entrar."
+  );
+}
