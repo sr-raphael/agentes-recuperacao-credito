@@ -5,6 +5,12 @@ from dotenv import load_dotenv
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
 
+from app.utils.negotiation_playbook import (
+    NegotiationStage,
+    STAGE_LABELS,
+    build_scripted_message,
+)
+
 _NEGOTIATOR_PROMPT_PATH = Path(__file__).resolve().parent / "prompts" / "negotiator_prompt.txt"
 
 
@@ -37,15 +43,18 @@ class NegotiatorAgent:
         credit_context,
         chat_history,
         *,
-        conversation_mode: str = "negociacao",
+        playbook_stage: NegotiationStage = "negociacao",
     ):
         """
-        user_message: Última mensagem do cliente
-        credit_context: JSON vindo do Agente de Crédito
-        chat_history: Lista de mensagens anteriores para manter o contexto
-        conversation_mode: saudacao | negociacao | continuacao
+        user_message: última mensagem do cliente
+        credit_context: JSON do Agente de Crédito
+        chat_history: mensagens anteriores
+        playbook_stage: saudacao | detalhamento | negociacao
         """
-        system_prompt = self._build_system_prompt(credit_context, conversation_mode)
+        if playbook_stage in ("saudacao", "detalhamento"):
+            return build_scripted_message(playbook_stage, credit_context)
+
+        system_prompt = self._build_system_prompt(credit_context, playbook_stage)
         messages = [SystemMessage(content=system_prompt)]
 
         for msg in (chat_history or [])[-5:]:
@@ -72,7 +81,9 @@ class NegotiatorAgent:
                 "Um atendente dará continuidade à sua negociação com segurança."
             )
 
-    def _build_system_prompt(self, context: dict, conversation_mode: str = "negociacao") -> str:
+    def _build_system_prompt(
+        self, context: dict, playbook_stage: NegotiationStage = "negociacao"
+    ) -> str:
         contract = context.get("contract_data") or {}
         limits = context.get("proposal_limits") or {}
 
@@ -85,6 +96,7 @@ DADOS DO CONTRATO:
 - Situação: {contract.get('situacao', '—')}
 - Valor original: R$ {contract.get('valor_original', 0)}
 - Juros acumulados: R$ {contract.get('juros_acumulado', 0)}
+- Parcelas em aberto: {contract.get('parcelas_abertas')} de {contract.get('numero_parcelas')}
 
 LIMITES DE PROPOSTA (não ultrapassar):
 - Conservadora (proposta_1): {limits.get('proposta_1')}
@@ -92,22 +104,14 @@ LIMITES DE PROPOSTA (não ultrapassar):
 - Limite final (proposta_3): {limits.get('proposta_3')}
 """
 
-        mode_block = ""
-        if conversation_mode == "saudacao":
-            mode_block = """
-MODO DESTE TURNO: SAUDAÇÃO / ABERTURA
-- O cliente apenas cumprimentou ou iniciou o papo sem pedir valores ainda.
-- Responda de forma breve, acolhedora e humana (1–3 frases).
-- Use o primeiro nome do cliente se disponível.
-- NÃO cite valores, descontos, parcelas nem propostas neste turno.
-- Convide educadamente a falar sobre regularização da dívida quando o cliente quiser.
-"""
-        elif conversation_mode == "continuacao":
-            mode_block = """
-MODO DESTE TURNO: CONTINUAÇÃO DA CONVERSA
-- Há histórico: mantenha coerência com o que já foi dito.
-- Só apresente números e propostas se o cliente pedir ou se fizer sentido no contexto.
+        stage_block = f"""
+ETAPA ATUAL DO ROTEIRO: {STAGE_LABELS.get(playbook_stage, playbook_stage)}
+- O cliente já passou pela saudação e pelo detalhamento do contrato.
+- Apresente SOMENTE a proposta CONSERVADORA (proposta_1) neste turno, salvo se o cliente já tiver recusado.
+- Só avance para proposta_2 ou proposta_3 se o cliente demonstrar dificuldade real de pagamento.
+- Nunca ultrapasse proposta_3.
+- Resposta objetiva (máximo ~6 frases); não repita saudação nem resumo do contrato.
 """
 
         template = _NEGOTIATOR_PROMPT_PATH.read_text(encoding="utf-8")
-        return f"{template.format(contexto_credito=contexto_credito)}\n{mode_block}"
+        return f"{template.format(contexto_credito=contexto_credito)}\n{stage_block}"

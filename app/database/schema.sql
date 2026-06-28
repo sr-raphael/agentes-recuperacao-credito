@@ -33,10 +33,12 @@ CREATE TABLE IF NOT EXISTS politicas_negociacao (
     max_prazo INTEGER NOT NULL
 );
 
--- Tabela de Logs de Negociação
+-- Tabela de Logs de Negociação (uma linha por turno da conversa)
 CREATE TABLE IF NOT EXISTS historico_negociacao (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     cliente_id INTEGER NOT NULL,
+    session_id TEXT NOT NULL,
+    etapa TEXT,
     data_interacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     transcricao_json JSON,
     acordo_fechado BOOLEAN DEFAULT FALSE,
@@ -47,3 +49,4 @@ CREATE TABLE IF NOT EXISTS historico_negociacao (
 -- Índices para performance em buscas por CPF e Faixas
 CREATE INDEX IF NOT EXISTS idx_clientes_cpf ON clientes(cpf);
 CREATE INDEX IF NOT EXISTS idx_politicas_busca ON politicas_negociacao(score_min, score_max, atraso_min, atraso_max);
+CREATE INDEX IF NOT EXISTS idx_historico_cliente_session ON historico_negociacao(cliente_id, session_id);

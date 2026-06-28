@@ -1,4 +1,7 @@
 const API_URL = "/v1/negociar";
+const HISTORY_URL = "/v1/negociar/historico";
+const SESSIONS_URL = "/v1/negociar/sessoes";
+const SESSION_STORAGE_KEY = "chat_session_id";
 
 const messagesEl = document.getElementById("messages");
 const formEl = document.getElementById("chat-form");
@@ -10,6 +13,7 @@ const typingEl = document.getElementById("typing");
 
 /** @type {{ role: 'user' | 'assistant', content: string }[]} */
 let historico = [];
+let sessionId = localStorage.getItem(SESSION_STORAGE_KEY) || crypto.randomUUID();
 
 function onlyDigits(value) {
   return (value || "").replace(/\D/g, "");
@@ -19,8 +23,21 @@ function formatTime(date = new Date()) {
   return date.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
 }
 
+function persistSessionId() {
+  localStorage.setItem(SESSION_STORAGE_KEY, sessionId);
+}
+
+function newSession() {
+  sessionId = crypto.randomUUID();
+  persistSessionId();
+}
+
 function scrollToBottom() {
   messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+function clearMessagesUi() {
+  messagesEl.innerHTML = "";
 }
 
 function appendMessage(role, content, meta = "") {
@@ -54,12 +71,45 @@ function appendSystem(text, isError = false) {
   scrollToBottom();
 }
 
+function renderHistorico(messages) {
+  clearMessagesUi();
+  historico = [];
+  for (const msg of messages) {
+    const role = msg.role === "user" ? "user" : "assistant";
+    appendMessage(role, msg.content);
+    historico.push({ role: msg.role, content: msg.content });
+  }
+}
+
 function setLoading(loading) {
   btnSend.disabled = loading;
   inputEl.disabled = loading;
   cpfEl.disabled = loading;
   typingEl.classList.toggle("hidden", !loading);
   typingEl.setAttribute("aria-hidden", loading ? "false" : "true");
+}
+
+async function loadSessionFromServer() {
+  const cpf = onlyDigits(cpfEl.value);
+  if (cpf.length !== 11) return;
+
+  try {
+    const params = new URLSearchParams({ cpf, session_id: sessionId });
+    const res = await fetch(`${HISTORY_URL}?${params}`);
+    if (!res.ok) return;
+
+    const data = await res.json();
+    if (data.session_id) {
+      sessionId = data.session_id;
+      persistSessionId();
+    }
+    if (Array.isArray(data.mensagens) && data.mensagens.length > 0) {
+      renderHistorico(data.mensagens);
+      appendSystem("Conversa restaurada do banco de dados.");
+    }
+  } catch {
+    /* ignora falha silenciosa no restore */
+  }
 }
 
 async function sendMessage(text) {
@@ -80,6 +130,7 @@ async function sendMessage(text) {
       body: JSON.stringify({
         cpf,
         mensagem: text,
+        session_id: sessionId,
         historico: historico.slice(0, -1),
       }),
     });
@@ -87,6 +138,7 @@ async function sendMessage(text) {
     const data = await res.json().catch(() => ({}));
 
     if (!res.ok) {
+      historico.pop();
       const detail =
         typeof data.detail === "string"
           ? data.detail
@@ -95,13 +147,20 @@ async function sendMessage(text) {
       return;
     }
 
+    if (data.session_id) {
+      sessionId = data.session_id;
+      persistSessionId();
+    }
+
     const resposta = data.resposta || "(sem resposta)";
     const status = data.status_auditoria || "";
-    const meta = status ? `${formatTime()} · ${status}` : formatTime();
+    const etapa = data.etapa ? ` · ${data.etapa}` : "";
+    const meta = status ? `${formatTime()} · ${status}${etapa}` : formatTime();
 
     appendMessage("assistant", resposta, meta);
     historico.push({ role: "assistant", content: resposta });
   } catch {
+    historico.pop();
     appendSystem(
       "Erro de conexão com o servidor. Verifique se a API está rodando (uvicorn).",
       true
@@ -133,12 +192,30 @@ inputEl.addEventListener("input", () => {
   inputEl.style.height = `${Math.min(inputEl.scrollHeight, 120)}px`;
 });
 
-btnClear.addEventListener("click", () => {
+cpfEl.addEventListener("change", () => {
+  loadSessionFromServer();
+});
+
+btnClear.addEventListener("click", async () => {
+  const cpf = onlyDigits(cpfEl.value);
   historico = [];
-  messagesEl.innerHTML = "";
+  clearMessagesUi();
+  newSession();
+
+  if (cpf.length === 11) {
+    try {
+      const params = new URLSearchParams({ cpf });
+      await fetch(`${SESSIONS_URL}?${params}`, { method: "DELETE" });
+    } catch {
+      /* limpa só a UI se a API falhar */
+    }
+  }
+
   appendSystem("Nova conversa iniciada. Envie uma mensagem para começar.");
 });
 
+persistSessionId();
 appendSystem(
   "Bem-vindo. Use o CPF de teste do seed (ex.: 12345678901) e digite sua mensagem."
 );
+loadSessionFromServer();

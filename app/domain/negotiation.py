@@ -12,6 +12,10 @@ class NegotiationRequest(BaseModel):
 
     cpf: str = Field(..., description="CPF do cliente (com ou sem máscara)")
     mensagem: str = Field(..., description="Última mensagem do usuário na conversa")
+    session_id: str | None = Field(
+        default=None,
+        description="Identificador da sessão de chat (UUID). Gera um novo se omitido.",
+    )
     historico: list[ChatMessage] = Field(
         default_factory=list,
         description="Mensagens anteriores (user/assistant), em ordem cronológica",
@@ -26,3 +30,37 @@ class NegotiationResponse(BaseModel):
         ...,
         description="Resultado do fluxo: aprovado, bloqueado_entrada, etc.",
     )
+    session_id: str = Field(..., description="Sessão da conversa (persistida no banco)")
+    etapa: str = Field(
+        default="",
+        description="Etapa do roteiro: cumprimento, detalhamento ou negociacao",
+    )
+
+
+class NegotiationHistoryResponse(BaseModel):
+    """Transcrição recuperada do banco para uma sessão."""
+
+    cpf: str
+    session_id: str
+    mensagens: list[ChatMessage] = Field(default_factory=list)
+
+
+class NegotiationSessionSummary(BaseModel):
+    session_id: str
+    iniciada_em: str
+    ultima_em: str
+    turnos: int
+
+
+class NegotiationSessionsResponse(BaseModel):
+    cpf: str
+    sessoes: list[NegotiationSessionSummary] = Field(default_factory=list)
+
+
+class ClearSessionsResponse(BaseModel):
+    """Resultado da limpeza de sessões de chat do cliente."""
+
+    cpf: str
+    sessoes_removidas: int = Field(..., description="Quantidade de session_id distintos apagados")
+    turnos_removidos: int = Field(..., description="Quantidade de linhas apagadas em historico_negociacao")
+    mensagem: str

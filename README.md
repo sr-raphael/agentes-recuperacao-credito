@@ -15,4 +15,17 @@ uvicorn app.main:app --reload
 5. Abre o chat no navegador
 http://127.0.0.1:8000/chat
 
-API: POST /v1/negociar · Health: GET /health · Docs: /docs
+API: POST /v1/negociar · GET/DELETE /v1/negociar/sessoes · Health: GET /health · Docs: /docs
+
+Limpar sessões de um CPF:
+```http
+DELETE /v1/negociar/sessoes?cpf=66710722058
+```
+
+Consultar histórico no SQLite:
+```sql
+SELECT h.id, c.cpf, h.session_id, h.data_interacao, h.resultado_auditoria, h.transcricao_json
+FROM historico_negociacao h
+JOIN clientes c ON c.id = h.cliente_id
+ORDER BY h.id DESC;
+```
