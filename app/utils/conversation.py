@@ -8,7 +8,33 @@ import re
 import unicodedata
 from typing import Any, Literal
 
-ConversationIntent = Literal["saudacao", "negociacao", "continuacao"]
+ConversationIntent = Literal["saudacao", "negociacao", "continuacao", "aceite_acordo"]
+
+_DEAL_ACCEPTANCE_KEYWORDS = (
+    "aceito",
+    "aceita",
+    "concordo",
+    "combinado",
+    "fechado",
+    "fechar",
+    "pode ser",
+    "pode ser sim",
+    "vou pagar",
+    "fecha o acordo",
+    "fechar o acordo",
+    "fechamos",
+    "de acordo",
+    "confirmo",
+    "confirmado",
+    "topo",
+    "tô dentro",
+    "to dentro",
+    "vamos fechar",
+    "quero fechar",
+)
+
+_PIX_KEYWORDS = ("pix", "qr code", "qrcode", "copia e cola", "copia-e-cola")
+_BOLETO_KEYWORDS = ("boleto", "linha digitavel", "linha digitável", "codigo de barras")
 
 _GREETING_ONLY_RE = re.compile(
     r"^\s*(oi|olá|ola|hey|e\s*aí|eai|bom\s+dia|boa\s+tarde|boa\s+noite|"
@@ -91,6 +117,26 @@ def detect_intent(
         return "saudacao"
 
     return "continuacao"
+
+
+def detect_deal_acceptance(user_message: str) -> bool:
+    folded = _fold(user_message)
+    if not folded:
+        return False
+    return any(k in folded for k in _DEAL_ACCEPTANCE_KEYWORDS)
+
+
+def detect_payment_method(user_message: str) -> Literal["pix", "boleto"] | None:
+    folded = _fold(user_message)
+    if not folded:
+        return None
+    has_pix = any(k in folded for k in _PIX_KEYWORDS)
+    has_boleto = any(k in folded for k in _BOLETO_KEYWORDS)
+    if has_pix and not has_boleto:
+        return "pix"
+    if has_boleto and not has_pix:
+        return "boleto"
+    return None
 
 
 def requires_compliance_audit(intent: ConversationIntent) -> bool:

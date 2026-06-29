@@ -35,6 +35,22 @@ class NegotiationResponse(BaseModel):
         default="",
         description="Etapa do roteiro: cumprimento, detalhamento ou negociacao",
     )
+    llm_metrics: dict | None = Field(
+        default=None,
+        description="Métricas do turno: tokens, custo e latência por agente",
+    )
+    custo_estimado_usd: float = Field(
+        default=0.0,
+        description="Custo estimado em USD da interação com LLM",
+    )
+    total_latencia_ms: int = Field(
+        default=0,
+        description="Tempo total de processamento do turno em milissegundos",
+    )
+    acordo_fechado: bool = Field(
+        default=False,
+        description="True quando o cliente concluiu acordo e recebeu pagamento simulado",
+    )
 
 
 class NegotiationHistoryResponse(BaseModel):

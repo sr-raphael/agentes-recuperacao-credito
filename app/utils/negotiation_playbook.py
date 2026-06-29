@@ -9,14 +9,22 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from app.utils.conversation import detect_intent
+from app.utils.conversation import detect_deal_acceptance, detect_intent
 
-NegotiationStage = Literal["saudacao", "detalhamento", "negociacao"]
+NegotiationStage = Literal[
+    "saudacao",
+    "detalhamento",
+    "negociacao",
+    "escolha_pagamento",
+    "pagamento_gerado",
+]
 
 STAGE_LABELS = {
     "saudacao": "1 — Saudação e aviso de dívida",
     "detalhamento": "2 — Detalhamento do contrato",
     "negociacao": "3 — Negociação de propostas",
+    "escolha_pagamento": "4 — Escolha da forma de pagamento",
+    "pagamento_gerado": "5 — Pagamento mock gerado",
 }
 
 _NEXT_STAGE: dict[str, NegotiationStage] = {
@@ -41,7 +49,15 @@ def resolve_playbook_stage(
     """
     history = chat_history or []
 
+    if last_etapa == "pagamento_gerado":
+        return "pagamento_gerado"
+
+    if last_etapa == "escolha_pagamento":
+        return "escolha_pagamento"
+
     if last_etapa == "negociacao":
+        if detect_deal_acceptance(user_message):
+            return "escolha_pagamento"
         return "negociacao"
 
     if detect_intent(user_message, history) == "negociacao":
@@ -96,4 +112,27 @@ def build_scripted_message(stage: NegotiationStage, credit_context: dict) -> str
             "Deseja que eu apresente opções para regularizar essa dívida?"
         )
 
+    if stage == "escolha_pagamento":
+        return (
+            f"Perfeito, {nome}! Registramos seu acordo nesta simulação.\n\n"
+            "Para concluir, como prefere pagar?\n"
+            "• Digite PIX para receber o código copia e cola\n"
+            "• Digite BOLETO para receber a linha digitável\n\n"
+            "Os dados gerados são fictícios e não possuem valor legal."
+        )
+
+    if stage == "pagamento_gerado":
+        return (
+            f"{nome}, seu acordo já foi registrado e o comprovante simulado foi enviado "
+            "nesta conversa. Se precisar rever as opções de negociação, inicie uma nova sessão."
+        )
+
     raise ValueError(f"Etapa sem script determinístico: {stage}")
+
+
+def build_payment_method_retry_message(credit_context: dict) -> str:
+    nome = (credit_context.get("contract_data") or {}).get("nome", "Cliente")
+    return (
+        f"{nome}, não identifiquei a forma de pagamento. "
+        "Responda PIX ou BOLETO para gerarmos o comprovante simulado."
+    )

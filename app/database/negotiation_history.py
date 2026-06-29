@@ -34,6 +34,20 @@ class NegotiationHistoryStore:
                 cur.execute(
                     "ALTER TABLE historico_negociacao ADD COLUMN etapa TEXT"
                 )
+            if "llm_metrics_json" not in cols:
+                if "llm_usage_json" in cols:
+                    cur.execute(
+                        "ALTER TABLE historico_negociacao "
+                        "RENAME COLUMN llm_usage_json TO llm_metrics_json"
+                    )
+                else:
+                    cur.execute(
+                        "ALTER TABLE historico_negociacao ADD COLUMN llm_metrics_json JSON"
+                    )
+            if "custo_estimado_usd" not in cols:
+                cur.execute(
+                    "ALTER TABLE historico_negociacao ADD COLUMN custo_estimado_usd REAL DEFAULT 0"
+                )
             cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_historico_cliente_session "
                 "ON historico_negociacao(cliente_id, session_id)"
@@ -56,12 +70,15 @@ class NegotiationHistoryStore:
         self,
         cpf: str,
         session_id: str,
-        transcript: list[dict[str, str]],
+        turn_messages: list[dict[str, str]],
         resultado_auditoria: str,
         *,
         etapa: str = "",
         acordo_fechado: bool = False,
+        llm_metrics: dict | None = None,
+        custo_estimado_usd: float = 0.0,
     ) -> int | None:
+        """Persiste um turno (par user/assistant), sem duplicar mensagens anteriores."""
         cliente_id = self.get_cliente_id(cpf)
         if cliente_id is None:
             return None
@@ -73,14 +90,17 @@ class NegotiationHistoryStore:
                 """
                 INSERT INTO historico_negociacao (
                     cliente_id, session_id, etapa, transcricao_json,
+                    llm_metrics_json, custo_estimado_usd,
                     acordo_fechado, resultado_auditoria
-                ) VALUES (?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     cliente_id,
                     session_id,
                     etapa,
-                    json.dumps(transcript, ensure_ascii=False),
+                    json.dumps(turn_messages, ensure_ascii=False),
+                    json.dumps(llm_metrics, ensure_ascii=False) if llm_metrics else None,
+                    float(custo_estimado_usd or 0),
                     int(acordo_fechado),
                     resultado_auditoria,
                 ),
@@ -113,6 +133,14 @@ class NegotiationHistoryStore:
         finally:
             conn.close()
 
+    @staticmethod
+    def _normalize_messages(data: list[Any]) -> list[dict[str, str]]:
+        return [
+            {"role": str(m.get("role", "user")), "content": str(m.get("content", ""))}
+            for m in data
+            if isinstance(m, dict)
+        ]
+
     def get_session_transcript(
         self, cpf: str, session_id: str
     ) -> list[dict[str, str]] | None:
@@ -128,22 +156,38 @@ class NegotiationHistoryStore:
                 SELECT transcricao_json
                 FROM historico_negociacao
                 WHERE cliente_id = ? AND session_id = ?
-                ORDER BY id DESC
-                LIMIT 1
+                ORDER BY id ASC
                 """,
                 (cliente_id, session_id),
             )
-            row = cur.fetchone()
-            if not row or not row[0]:
+            rows = cur.fetchall()
+            if not rows:
                 return None
-            data = json.loads(row[0])
-            if not isinstance(data, list):
+
+            chunks: list[list[dict[str, str]]] = []
+            for row in rows:
+                if not row or not row[0]:
+                    continue
+                data = json.loads(row[0])
+                if isinstance(data, list):
+                    chunks.append(self._normalize_messages(data))
+
+            if not chunks:
                 return None
-            return [
-                {"role": str(m.get("role", "user")), "content": str(m.get("content", ""))}
-                for m in data
-                if isinstance(m, dict)
-            ]
+
+            lengths = [len(c) for c in chunks]
+            # Formato antigo: cada linha guardava a conversa inteira (crescente).
+            if (
+                len(lengths) >= 2
+                and lengths[-1] > 2
+                and all(lengths[i] <= lengths[i + 1] for i in range(len(lengths) - 1))
+            ):
+                return chunks[-1]
+
+            transcript: list[dict[str, str]] = []
+            for chunk in chunks:
+                transcript.extend(chunk)
+            return transcript or None
         finally:
             conn.close()
 

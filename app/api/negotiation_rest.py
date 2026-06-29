@@ -65,6 +65,10 @@ class NegotiationRestApi:
                     status_auditoria=resultado["auditoria_status"],
                     session_id=resultado["session_id"],
                     etapa=resultado.get("etapa", ""),
+                    llm_metrics=resultado.get("llm_metrics"),
+                    custo_estimado_usd=float(resultado.get("custo_estimado_usd") or 0),
+                    total_latencia_ms=int(resultado.get("total_latencia_ms") or 0),
+                    acordo_fechado=bool(resultado.get("acordo_fechado")),
                 )
             except HTTPException:
                 raise

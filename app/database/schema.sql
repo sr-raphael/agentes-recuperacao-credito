@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS politicas_negociacao (
     max_prazo INTEGER NOT NULL
 );
 
--- Tabela de Logs de Negociação (uma linha por turno da conversa)
+-- Tabela de Logs de Negociação (uma linha por turno; transcricao_json = par user/assistant do turno)
 CREATE TABLE IF NOT EXISTS historico_negociacao (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     cliente_id INTEGER NOT NULL,
@@ -42,6 +42,8 @@ CREATE TABLE IF NOT EXISTS historico_negociacao (
     etapa TEXT,
     data_interacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     transcricao_json JSON,
+    llm_metrics_json JSON,
+    custo_estimado_usd REAL DEFAULT 0,
     acordo_fechado BOOLEAN DEFAULT FALSE,
     resultado_auditoria TEXT,
     FOREIGN KEY (cliente_id) REFERENCES clientes (id)
