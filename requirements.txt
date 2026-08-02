@@ -13,3 +13,10 @@ bcrypt>=4.0.0
 # --- Agentes (LangChain + Gemini) ---
 langchain-core>=0.3.0
 langchain-google-genai>=2.0.0
+
+# --- Análise de métricas (notebooks) ---
+pandas>=2.0.0
+matplotlib>=3.8.0
+seaborn>=0.13.0
+plotly>=5.18.0
+jupyter>=1.0.0

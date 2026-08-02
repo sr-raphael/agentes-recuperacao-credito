@@ -4,3 +4,4 @@ venv/
 *.log
 .vscode/
 app/database/credito.db
+notebooks/output/

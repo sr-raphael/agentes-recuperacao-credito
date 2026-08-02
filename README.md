@@ -1,32 +1,133 @@
 # Multi-Agentes de Recuperação de Crédito com Gemini
 
-## Preparar ambiente
+Sistema multi-agente para negociação de dívidas: analista de crédito (SQLite), negociador e auditor (Gemini), com chat web, autenticação JWT e persistência de métricas por turno.
 
-1. Cria ambiente virtual
+## Arquitetura
 
-source ./venv/Scripts/activate
+```
+Cliente (chat) → FastAPI → CoordinatorAgent
+                              ├─ CreditAnalystAgent   (contrato + política)
+                              ├─ NegotiatorAgent      (Gemini)
+                              ├─ AuditorAgent         (Gemini)
+                              └─ NegotiationHistoryStore (SQLite)
+```
 
-1. Instala requirements
+**Fluxo por turno:** guardrails de entrada → roteiro conversacional → LLM + auditoria (na etapa de negociação) → gravação em `historico_negociacao` (transcrição, métricas LLM, custo, latência).
 
+## Pré-requisitos
+
+- Python 3.11+
+- Chave da API Gemini ([Google AI Studio](https://aistudio.google.com/))
+
+## Configuração
+
+1. Clone o repositório e crie o ambiente virtual:
+
+```bash
+python -m venv venv
+source ./venv/Scripts/activate   # Git Bash / Linux
+# .\venv\Scripts\activate        # PowerShell
+```
+
+2. Instale as dependências:
+
+```bash
 pip install -r requirements.txt
+```
 
-1. Popula database
+3. Configure variáveis de ambiente:
 
+```bash
+cp .env.example .env
+```
+
+| Variável | Descrição |
+|----------|-----------|
+| `API_KEY` | Chave Gemini |
+| `JWT_SECRET_KEY` | Assinatura dos tokens JWT |
+| `AGENT_MODEL_NEGOCIATOR` | Modelo do negociador (padrão: `gemini-2.5-flash`) |
+| `AGENT_MODEL_AUDITOR` | Modelo do auditor (padrão: `gemini-2.5-flash`) |
+
+4. Popule o banco de dados:
+
+```bash
 py ./app/database/seed_db.py
+```
 
-## Execução do projeto
+## Executar
 
-1. Executa projeto
-
+```bash
 uvicorn app.main:app --reload
+```
 
-1. Documentação
+| Recurso | URL |
+|---------|-----|
+| Chat | http://127.0.0.1:8000/chat |
+| Swagger | http://127.0.0.1:8000/docs |
+| Health | http://127.0.0.1:8000/health |
 
-[http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
+### Login (seed)
 
-1. Abre o chat no navegador
+Todos os clientes do seed usam senha **`12345`**.
 
-[http://127.0.0.1:8000/chat](http://127.0.0.1:8000/chat)
+| Cliente | CPF |
+|---------|-----|
+| Flavio Silva | 59126335000 |
+| Guilherme Dias | 70388578009 |
+| Vagner Pereira | 42014252076 |
+| Joaquim Oliveira | 40591273020 |
+| Mariana Santos | 66710722058 |
+| Rodrigo Ferreira | 22526801052 |
 
-1. Login no chat: CPF do seed + senha do cliente (padrão no seed: `12345`).
+## API
 
+| Método | Rota | Auth |
+|--------|------|------|
+| `POST` | `/v1/auth/login` | — |
+| `POST` | `/v1/negociar` | Bearer |
+| `GET` | `/v1/negociar/historico` | Bearer |
+| `GET` | `/v1/negociar/sessoes` | Bearer |
+| `DELETE` | `/v1/negociar/sessoes` | Bearer |
+
+O CPF do body/query deve ser o mesmo do token JWT.
+
+Scripts Postman: `postman/pre-request.js` (login automático com CPF/senha fixos do seed).
+
+## Métricas e gráficos
+
+Negociações gravam por turno em `historico_negociacao`:
+
+- `llm_metrics_json` — tokens, latência e custo por agente
+- `custo_estimado_usd`, `resultado_auditoria`, `acordo_fechado`
+
+Para gerar gráficos:
+
+```bash
+python -m jupyter notebook notebooks/analise_metricas.ipynb
+```
+
+Saídas em `notebooks/output/` (PNG + HTML interativo).
+
+Loader Python: `app/analytics/metrics_loader.py`.
+
+## Estrutura do projeto
+
+```
+app/
+├── agents/          # Coordinator, negociador, auditor, analista de crédito
+├── api/             # Rotas REST (auth, negociação)
+├── analytics/       # Carga de métricas para notebooks
+├── database/        # Schema, seed, histórico SQLite
+├── domain/          # Modelos Pydantic
+├── security/        # JWT e hash de senhas
+├── static/chat/     # Frontend do chat
+└── utils/           # Guardrails, playbook, métricas LLM
+notebooks/           # Análise de métricas
+postman/             # Scripts de autenticação
+```
+
+## Segurança
+
+- Senhas em bcrypt no banco; JWT válido por 1 hora
+- Guardrails de entrada (`input_guardrails.py`): injection, tamanho, CPF
+- Auditor de compliance na saída do negociador (limites de crédito)
