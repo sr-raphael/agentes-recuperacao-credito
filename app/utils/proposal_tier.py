@@ -110,9 +110,45 @@ def suggest_next_tier(
     return min_tier
 
 
+def extract_proposal_metadata(
+    text: str, limits: dict[str, Any]
+) -> tuple[int | None, float | None]:
+    """
+    Infere faixa (1–3) e valor em R$ a partir do texto do assistente.
+    Retorna (None, None) se não houver valor monetário reconhecível.
+    """
+    values = extract_brl_values(text)
+    if not values:
+        return None, None
+
+    tier = infer_tier_from_text(text, limits)
+    if tier is not None:
+        tier_val = proposta_value(limits, tier)
+        valor = min(values, key=lambda v: abs(v - tier_val))
+        return tier, round(valor, 2)
+
+    return None, round(values[-1], 2)
+
+
 def proposta_value(limits: dict[str, Any], tier: int) -> float:
     key = _TIER_KEYS[max(1, min(3, tier)) - 1]
     return float(limits.get(key) or 0)
+
+
+def resolve_agreed_offer(
+    history: list[dict[str, str]] | None,
+    limits: dict[str, Any],
+) -> tuple[int, float]:
+    """
+    Faixa e valor do acordo com base na maior proposta já citada pelo assistente.
+    Fallback: faixa 1 (proposta conservadora).
+    """
+    tier = max_tier_from_history(history, limits)
+    valor = proposta_value(limits, tier)
+    if valor <= 0:
+        tier = 1
+        valor = proposta_value(limits, tier)
+    return tier, round(valor, 2)
 
 
 def tier_label(tier: int) -> str:

@@ -5,6 +5,7 @@ Foco: prompt injection comum, abuso de tamanho e CPF claramente inválido.
 
 from __future__ import annotations
 
+import hashlib
 import re
 import unicodedata
 from dataclasses import dataclass
@@ -42,6 +43,20 @@ _INJECTION_SUBSTRINGS = (
     "### new instructions",
 )
 
+_REASON_TO_AUDITORIA: dict[str, str] = {
+    "injection": "bloqueado_entrada_injection",
+    "historico_injection": "bloqueado_entrada_injection",
+    "mensagem_vazia": "bloqueado_entrada_vazio",
+    "mensagem_tamanho": "bloqueado_entrada_tamanho",
+    "historico_tamanho_itens": "bloqueado_entrada_tamanho",
+    "historico_mensagem_vazia": "bloqueado_entrada_tamanho",
+    "historico_mensagem_tamanho": "bloqueado_entrada_tamanho",
+    "historico_tamanho_total": "bloqueado_entrada_tamanho",
+    "cpf_formato": "bloqueado_entrada_cpf",
+    "cpf_checksum": "bloqueado_entrada_cpf",
+    "historico_role_invalido": "bloqueado_entrada_historico",
+}
+
 _CONTROL_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 _ZERO_WIDTH_RE = re.compile(r"[\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]")
 _REPEAT_CHAR_RE = re.compile(r"(.)\1{49,}")  # mesmo caractere 50+ vezes seguidas
@@ -60,6 +75,52 @@ class GuardrailResult:
 
     cpf_digits: str = ""
     """CPF somente dígitos (usar só se ok)."""
+
+    reason_code: str = ""
+    """Código interno do bloqueio (persistido em motivo_bloqueio; não expor ao cliente)."""
+
+
+def hash_input(text: str) -> str:
+    """SHA-256 do texto normalizado (utilitário para deduplicação offline)."""
+    normalized = _normalize_text(str(text or ""))
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+MAX_STORED_MESSAGE_CHARS = 2_000
+
+_CPF_FORMATTED_RE = re.compile(r"\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b")
+_CPF_DIGITS_RE = re.compile(r"\b\d{11}\b")
+_EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+", re.IGNORECASE)
+_PHONE_RE = re.compile(
+    r"\b(?:\+55\s?)?(?:\(\d{2}\)\s?|\d{2}\s)?\d{4,5}[-\s]?\d{4}\b"
+)
+_CARD_RE = re.compile(r"\b\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}\b")
+
+
+def mask_for_storage(text: str) -> str:
+    """
+    Mascara PII antes de persistir em transcricao_json.
+    Mantém frases de injection legíveis para auditoria no TCC/analytics.
+    """
+    s = _normalize_text(str(text or ""))
+    if not s:
+        return s
+
+    s = _CPF_FORMATTED_RE.sub("[CPF]", s)
+    s = _CPF_DIGITS_RE.sub("[CPF]", s)
+    s = _EMAIL_RE.sub("[email]", s)
+    s = _PHONE_RE.sub("[telefone]", s)
+    s = _CARD_RE.sub("[cartao]", s)
+
+    if len(s) > MAX_STORED_MESSAGE_CHARS:
+        return s[:MAX_STORED_MESSAGE_CHARS] + "… [truncado]"
+    return s
+
+
+def auditoria_status_for_block(reason_code: str) -> str:
+    if not reason_code:
+        return "bloqueado_entrada"
+    return _REASON_TO_AUDITORIA.get(reason_code, "bloqueado_entrada")
 
 
 def _normalize_text(s: str) -> str:
@@ -104,6 +165,22 @@ def _injection_heuristic(text: str) -> bool:
     return False
 
 
+def _blocked(
+    user_message: str,
+    reason_code: str,
+    *,
+    sanitized_input: str = "",
+    cpf_digits: str = "",
+) -> GuardrailResult:
+    return GuardrailResult(
+        ok=False,
+        user_message=user_message,
+        sanitized_input=sanitized_input,
+        cpf_digits=cpf_digits,
+        reason_code=reason_code,
+    )
+
+
 def validate_debt_request(
     user_input: str,
     client_cpf: str,
@@ -127,28 +204,24 @@ def validate_debt_request(
     raw_in = user_input if isinstance(user_input, str) else str(user_input)
     sanitized = _normalize_text(raw_in)
     if not sanitized:
-        return GuardrailResult(ok=False, user_message=generic, sanitized_input="", cpf_digits="")
+        return _blocked(generic, "mensagem_vazia")
 
     if len(sanitized) > MAX_USER_MESSAGE_CHARS:
-        return GuardrailResult(ok=False, user_message=generic, sanitized_input="", cpf_digits="")
+        return _blocked(generic, "mensagem_tamanho")
 
     if _injection_heuristic(sanitized):
-        return GuardrailResult(ok=False, user_message=injection_msg, sanitized_input="", cpf_digits="")
+        return _blocked(injection_msg, "injection")
 
     cpf = _cpf_digits(client_cpf)
     if len(cpf) != 11:
-        return GuardrailResult(
-            ok=False,
-            user_message="CPF inválido. Informe os 11 dígitos do seu CPF.",
-            sanitized_input="",
-            cpf_digits="",
+        return _blocked(
+            "CPF inválido. Informe os 11 dígitos do seu CPF.",
+            "cpf_formato",
         )
     if not _valid_cpf_checksum(cpf):
-        return GuardrailResult(
-            ok=False,
-            user_message="CPF inválido. Verifique os números e tente novamente.",
-            sanitized_input="",
-            cpf_digits="",
+        return _blocked(
+            "CPF inválido. Verifique os números e tente novamente.",
+            "cpf_checksum",
         )
 
     return GuardrailResult(
@@ -156,6 +229,7 @@ def validate_debt_request(
         user_message="",
         sanitized_input=sanitized,
         cpf_digits=cpf,
+        reason_code="",
     )
 
 
@@ -169,7 +243,7 @@ def validate_chat_history(chat_history: list | None) -> GuardrailResult:
         return GuardrailResult(ok=True, user_message="", sanitized_input="", cpf_digits="")
 
     if len(chat_history) > MAX_CHAT_HISTORY_ITEMS:
-        return GuardrailResult(ok=False, user_message=generic)
+        return _blocked(generic, "historico_tamanho_itens")
 
     total_chars = 0
     for item in chat_history:
@@ -181,14 +255,16 @@ def validate_chat_history(chat_history: list | None) -> GuardrailResult:
             content = _normalize_text(str(getattr(item, "content", "") or ""))
 
         if role not in ("user", "assistant"):
-            return GuardrailResult(ok=False, user_message=generic)
-        if not content or len(content) > MAX_SINGLE_HISTORY_MESSAGE_CHARS:
-            return GuardrailResult(ok=False, user_message=generic)
+            return _blocked(generic, "historico_role_invalido")
+        if not content:
+            return _blocked(generic, "historico_mensagem_vazia")
+        if len(content) > MAX_SINGLE_HISTORY_MESSAGE_CHARS:
+            return _blocked(generic, "historico_mensagem_tamanho")
         if _injection_heuristic(content):
-            return GuardrailResult(ok=False, user_message=generic)
+            return _blocked(generic, "historico_injection")
 
         total_chars += len(content)
         if total_chars > MAX_CHAT_HISTORY_TOTAL_CHARS:
-            return GuardrailResult(ok=False, user_message=generic)
+            return _blocked(generic, "historico_tamanho_total")
 
     return GuardrailResult(ok=True, user_message="", sanitized_input="", cpf_digits="")

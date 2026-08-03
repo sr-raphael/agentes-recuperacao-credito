@@ -7,6 +7,31 @@ class ChatMessage(BaseModel):
     content: str = Field(..., description="Texto da mensagem")
 
 
+class HistoryChatMessage(ChatMessage):
+    """Mensagem retornada pelo GET /historico; metadados só em role assistant."""
+
+    etapa: str = Field(
+        default="",
+        description="Etapa do turno (ex.: negociacao, bloqueado_entrada)",
+    )
+    resultado_auditoria: str = Field(
+        default="",
+        description="Resultado da auditoria ou guardrail daquele turno",
+    )
+    faixa_proposta: int | None = Field(
+        default=None,
+        description="Faixa de proposta (1–3) quando aplicável",
+    )
+    valor_citado: float | None = Field(
+        default=None,
+        description="Valor em R$ citado na resposta do assistente",
+    )
+    auditoria_json: dict | None = Field(
+        default=None,
+        description="Veredito estruturado do auditor LLM (turnos de negociacao)",
+    )
+
+
 class NegotiationRequest(BaseModel):
     """Entrada da rota de negociação: identificação do cliente e última interação."""
 
@@ -28,7 +53,7 @@ class NegotiationResponse(BaseModel):
     resposta: str = Field(..., description="Texto a exibir ao cliente")
     status_auditoria: str = Field(
         ...,
-        description="Resultado do fluxo: aprovado, bloqueado_entrada, etc.",
+        description="Resultado do fluxo: aprovado, bloqueado_entrada_injection, etc.",
     )
     session_id: str = Field(..., description="Sessão da conversa (persistida no banco)")
     etapa: str = Field(
@@ -58,7 +83,7 @@ class NegotiationHistoryResponse(BaseModel):
 
     cpf: str
     session_id: str
-    mensagens: list[ChatMessage] = Field(default_factory=list)
+    mensagens: list[HistoryChatMessage] = Field(default_factory=list)
 
 
 class NegotiationSessionSummary(BaseModel):

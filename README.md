@@ -99,12 +99,21 @@ Negociações gravam por turno em `historico_negociacao`:
 
 - `llm_metrics_json` — tokens, latência e custo por agente
 - `custo_estimado_usd`, `resultado_auditoria`, `acordo_fechado`
+- `faixa_proposta`, `valor_citado` — proposta inferida do texto enviado ao cliente
+- `auditoria_json` — veredito completo do auditor LLM (turnos em `negociacao`)
 
-Para gerar gráficos:
+Para gerar gráficos e KPIs do TCC:
 
 ```bash
 python -m jupyter notebook notebooks/analise_metricas.ipynb
 ```
+
+O notebook está organizado em:
+- **A.** Resumo executivo (`kpis_resumo.csv`)
+- **B.** Eficácia (funil, conversão, turnos até acordo, faixa máxima)
+- **C.** Aderência (auditor, faixa/valor, motivos de rejeição)
+- **D.** Segurança (bloqueios guardrail)
+- **E.** Operacional LLM (tokens, latência, custo)
 
 Saídas em `notebooks/output/` (PNG + HTML interativo).
 
@@ -129,5 +138,5 @@ postman/             # Scripts de autenticação
 ## Segurança
 
 - Senhas em bcrypt no banco; JWT válido por 1 hora
-- Guardrails de entrada (`input_guardrails.py`): injection, tamanho, CPF
+- Guardrails de entrada (`input_guardrails.py`): injection, tamanho, CPF — bloqueios em `historico_negociacao` com `motivo_bloqueio` e mensagem mascarada em `transcricao_json`
 - Auditor de compliance na saída do negociador (limites de crédito)

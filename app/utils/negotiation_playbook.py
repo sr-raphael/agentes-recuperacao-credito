@@ -81,7 +81,12 @@ def format_brl(value: float | int) -> str:
     return f"R$ {n:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
-def build_scripted_message(stage: NegotiationStage, credit_context: dict) -> str:
+def build_scripted_message(
+    stage: NegotiationStage,
+    credit_context: dict,
+    *,
+    agreed_valor: float | None = None,
+) -> str:
     contract = credit_context.get("contract_data") or {}
     nome = contract.get("nome", "Cliente")
     valor = float(contract.get("valor_original", 0))
@@ -113,8 +118,12 @@ def build_scripted_message(stage: NegotiationStage, credit_context: dict) -> str
         )
 
     if stage == "escolha_pagamento":
+        valor_linha = ""
+        if agreed_valor is not None and agreed_valor > 0:
+            valor_linha = f"Valor acordado: {format_brl(agreed_valor)}\n\n"
         return (
             f"Perfeito, {nome}! Registramos seu acordo nesta simulação.\n\n"
+            f"{valor_linha}"
             "Para concluir, como prefere pagar?\n"
             "• Digite PIX para receber o código copia e cola\n"
             "• Digite BOLETO para receber a linha digitável\n\n"
@@ -130,9 +139,17 @@ def build_scripted_message(stage: NegotiationStage, credit_context: dict) -> str
     raise ValueError(f"Etapa sem script determinístico: {stage}")
 
 
-def build_payment_method_retry_message(credit_context: dict) -> str:
+def build_payment_method_retry_message(
+    credit_context: dict,
+    *,
+    agreed_valor: float | None = None,
+) -> str:
     nome = (credit_context.get("contract_data") or {}).get("nome", "Cliente")
+    valor_linha = ""
+    if agreed_valor is not None and agreed_valor > 0:
+        valor_linha = f"Valor acordado: {format_brl(agreed_valor)}. "
     return (
         f"{nome}, não identifiquei a forma de pagamento. "
+        f"{valor_linha}"
         "Responda PIX ou BOLETO para gerarmos o comprovante simulado."
     )

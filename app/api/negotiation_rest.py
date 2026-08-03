@@ -14,6 +14,7 @@ from app.domain.negotiation import (
     NegotiationResponse,
     NegotiationSessionSummary,
     NegotiationSessionsResponse,
+    HistoryChatMessage,
 )
 from app.security.jwt_auth import assert_cpf_matches_token, get_current_cpf
 
@@ -91,16 +92,17 @@ class NegotiationRestApi:
             assert_cpf_matches_token(token_cpf, cpf_digits)
 
             coordinator = self._get_coordinator()
-            mensagens = coordinator.history_store.get_session_transcript(
-                cpf_digits, session_id.strip()
+            sid = session_id.strip()
+            mensagens = coordinator.history_store.get_session_history_messages(
+                cpf_digits, sid
             )
             if mensagens is None:
                 mensagens = []
 
             return NegotiationHistoryResponse(
                 cpf=cpf_digits,
-                session_id=session_id.strip(),
-                mensagens=[ChatMessage(**m) for m in mensagens],
+                session_id=sid,
+                mensagens=[HistoryChatMessage(**m) for m in mensagens],
             )
 
         @self.router.get("/v1/negociar/sessoes", response_model=NegotiationSessionsResponse)

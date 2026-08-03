@@ -16,6 +16,24 @@ def _default_db_path(db_path: str | Path | None) -> Path:
     return Path(db_path) if db_path else _DEFAULT_DB
 
 
+def _flatten_auditoria(row: dict[str, Any]) -> dict[str, Any]:
+    audit: dict[str, Any] = {}
+    raw = row.get("auditoria_json")
+    if raw:
+        try:
+            audit = json.loads(raw) if isinstance(raw, str) else raw
+        except (json.JSONDecodeError, TypeError):
+            audit = {}
+    return {
+        "faixa_proposta": row.get("faixa_proposta"),
+        "valor_citado": float(row["valor_citado"]) if row.get("valor_citado") is not None else None,
+        "auditoria_aprovado": audit.get("aprovado"),
+        "auditoria_motivo_rejeicao": audit.get("motivo_rejeicao") or "",
+        "auditoria_risco": audit.get("risco_detectado") or "",
+        "auditoria_correcao_sugerida": audit.get("correcao_sugerida") or "",
+    }
+
+
 def _flatten_metrics(row: dict[str, Any]) -> dict[str, Any]:
     metrics: dict[str, Any] = {}
     raw = row.get("llm_metrics_json")
@@ -63,6 +81,10 @@ def load_turn_metrics_df(db_path: str | Path | None = None) -> pd.DataFrame:
                 h.custo_estimado_usd,
                 h.acordo_fechado,
                 h.resultado_auditoria,
+                h.motivo_bloqueio,
+                h.faixa_proposta,
+                h.valor_citado,
+                h.auditoria_json,
                 h.llm_metrics_json,
                 c.id AS cliente_id,
                 c.cpf,
@@ -92,6 +114,7 @@ def load_turn_metrics_df(db_path: str | Path | None = None) -> pd.DataFrame:
             "custo_estimado_usd": float(row["custo_estimado_usd"] or 0),
             "acordo_fechado": bool(row["acordo_fechado"]),
             "resultado_auditoria": row["resultado_auditoria"] or "",
+            "motivo_bloqueio": row["motivo_bloqueio"] or "",
             "cliente_id": row["cliente_id"],
             "cpf": row["cpf"],
             "nome": row["nome"],
@@ -100,6 +123,7 @@ def load_turn_metrics_df(db_path: str | Path | None = None) -> pd.DataFrame:
             "valor_original": row["valor_original"],
         }
         base.update(_flatten_metrics(row))
+        base.update(_flatten_auditoria(row))
         flat_rows.append(base)
 
     df = pd.DataFrame(flat_rows)
@@ -163,3 +187,142 @@ def load_etapa_summary(df: pd.DataFrame | None = None, **kwargs) -> pd.DataFrame
         )
         .sort_values("turnos", ascending=False)
     )
+
+
+def load_effectiveness_summary(df: pd.DataFrame | None = None, **kwargs) -> pd.DataFrame:
+    """KPIs de eficácia agregados por sessão."""
+    if df is None:
+        df = load_turn_metrics_df(**kwargs)
+    if df.empty:
+        return pd.DataFrame()
+
+    sessoes = load_session_summary(df)
+    if sessoes.empty:
+        return pd.DataFrame()
+
+    neg = df[df["etapa"] == "negociacao"].copy()
+    faixa_por_sessao = (
+        neg.groupby("session_id", as_index=False)
+        .agg(
+            faixa_max=("faixa_proposta", "max"),
+            valor_ultimo=("valor_citado", "last"),
+        )
+    )
+    sessoes = sessoes.merge(faixa_por_sessao, on="session_id", how="left")
+    sessoes["duracao_min"] = (
+        (sessoes["fim"] - sessoes["inicio"]).dt.total_seconds() / 60.0
+    ).round(1)
+    sessoes["converteu"] = sessoes["acordo_fechado"].astype(bool)
+    return sessoes
+
+
+def load_funnel_df(df: pd.DataFrame | None = None, **kwargs) -> pd.DataFrame:
+    """Quantidade de sessões que atingiram cada etapa do roteiro."""
+    if df is None:
+        df = load_turn_metrics_df(**kwargs)
+    if df.empty:
+        return pd.DataFrame()
+
+    ordem = [
+        "saudacao",
+        "detalhamento",
+        "negociacao",
+        "escolha_pagamento",
+        "pagamento_gerado",
+        "bloqueado_entrada",
+    ]
+    por_sessao = df.groupby("session_id")["etapa"].apply(set)
+    total = len(por_sessao)
+    rows: list[dict[str, Any]] = []
+    for etapa in ordem:
+        n = sum(1 for etapas in por_sessao if etapa in etapas)
+        rows.append(
+            {
+                "etapa": etapa,
+                "sessoes": n,
+                "pct_sessoes": round(100.0 * n / total, 1) if total else 0.0,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def load_adherence_summary(df: pd.DataFrame | None = None, **kwargs) -> pd.DataFrame:
+    """Turnos de negociacao com métricas de aderência (auditor + faixa/valor)."""
+    if df is None:
+        df = load_turn_metrics_df(**kwargs)
+    if df.empty:
+        return pd.DataFrame()
+
+    neg = df[df["etapa"] == "negociacao"].copy()
+    if neg.empty:
+        return pd.DataFrame()
+
+    neg["auditoria_aprovado"] = neg["auditoria_aprovado"].fillna(False).astype(bool)
+    return neg
+
+
+def load_security_summary(df: pd.DataFrame | None = None, **kwargs) -> pd.DataFrame:
+    """Turnos bloqueados por guardrails de entrada."""
+    if df is None:
+        df = load_turn_metrics_df(**kwargs)
+    if df.empty:
+        return pd.DataFrame()
+
+    bloq = df[df["etapa"] == "bloqueado_entrada"].copy()
+    if bloq.empty:
+        return pd.DataFrame()
+    return (
+        bloq.groupby("motivo_bloqueio", as_index=False)
+        .agg(turnos=("turno_id", "count"))
+        .sort_values("turnos", ascending=False)
+    )
+
+
+def load_kpi_table(df: pd.DataFrame | None = None, **kwargs) -> pd.DataFrame:
+    """
+    Tabela única de KPIs para o TCC (eficácia, aderência, operacional, segurança).
+    """
+    if df is None:
+        df = load_turn_metrics_df(**kwargs)
+    if df.empty:
+        return pd.DataFrame(columns=["categoria", "kpi", "valor"])
+
+    sessoes = load_session_summary(df)
+    neg = df[df["etapa"] == "negociacao"]
+    bloq = df[df["etapa"] == "bloqueado_entrada"]
+    llm = df[df["com_llm"]]
+
+    n_sessoes = int(sessoes["session_id"].nunique()) if not sessoes.empty else 0
+    n_acordos = int(sessoes["acordo_fechado"].sum()) if not sessoes.empty else 0
+    n_neg = len(neg)
+    n_aprov = int((neg["resultado_auditoria"] == "aprovado").sum()) if n_neg else 0
+    n_ajuste = int((neg["resultado_auditoria"] == "ajustado_pos_auditoria").sum()) if n_neg else 0
+
+    turnos_ate_acordo = None
+    if n_acordos and not sessoes.empty:
+        fechadas = sessoes[sessoes["acordo_fechado"]]
+        turnos_ate_acordo = round(float(fechadas["turnos"].mean()), 1)
+
+    custo_acordo = None
+    if n_acordos and not sessoes.empty:
+        custo_acordo = round(
+            float(sessoes[sessoes["acordo_fechado"]]["custo_total_usd"].mean()), 6
+        )
+
+    rows = [
+        ("Eficácia", "Sessões totais", n_sessoes),
+        ("Eficácia", "Taxa de conversão (%)", round(100.0 * n_acordos / n_sessoes, 1) if n_sessoes else 0),
+        ("Eficácia", "Acordos fechados", n_acordos),
+        ("Eficácia", "Turnos médios até acordo", turnos_ate_acordo if turnos_ate_acordo is not None else "—"),
+        ("Eficácia", "Custo médio por acordo (USD)", custo_acordo if custo_acordo is not None else "—"),
+        ("Aderência", "Turnos em negociacao", n_neg),
+        ("Aderência", "Taxa aprovação auditor (%)", round(100.0 * n_aprov / n_neg, 1) if n_neg else "—"),
+        ("Aderência", "Taxa ajuste pós-auditoria (%)", round(100.0 * n_ajuste / n_neg, 1) if n_neg else "—"),
+        ("Operacional", "Turnos totais", len(df)),
+        ("Operacional", "Turnos com LLM", len(llm)),
+        ("Operacional", "Custo total LLM (USD)", round(float(df["custo_estimado_usd"].sum()), 6)),
+        ("Operacional", "Tokens totais", int(llm["total_tokens"].sum()) if not llm.empty else 0),
+        ("Segurança", "Bloqueios de entrada", len(bloq)),
+        ("Segurança", "Taxa bloqueio (%)", round(100.0 * len(bloq) / len(df), 1) if len(df) else 0),
+    ]
+    return pd.DataFrame(rows, columns=["categoria", "kpi", "valor"])

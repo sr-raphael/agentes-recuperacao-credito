@@ -7,6 +7,7 @@ import re
 from typing import Literal
 
 from app.utils.negotiation_playbook import format_brl
+from app.utils.proposal_tier import proposta_value
 
 PaymentMethod = Literal["pix", "boleto"]
 
@@ -74,11 +75,20 @@ def build_payment_confirmation(
     *,
     cpf: str,
     session_id: str,
+    agreed_tier: int | None = None,
+    agreed_valor: float | None = None,
 ) -> str:
     contract = credit_context.get("contract_data") or {}
     limits = credit_context.get("proposal_limits") or {}
     nome = contract.get("nome", "Cliente")
-    valor = float(limits.get("proposta_1") or 0)
+
+    if agreed_valor is not None and agreed_valor > 0:
+        valor = float(agreed_valor)
+    elif agreed_tier is not None:
+        valor = proposta_value(limits, agreed_tier)
+    else:
+        valor = proposta_value(limits, 1)
+
     if valor <= 0:
         valor = float(contract.get("valor_original") or 0) + float(
             contract.get("juros_acumulado") or 0

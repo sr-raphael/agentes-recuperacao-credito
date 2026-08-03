@@ -1,3 +1,4 @@
+import re
 import time
 import uuid
 from pathlib import Path
@@ -17,8 +18,22 @@ from app.utils.negotiation_playbook import (
     resolve_playbook_stage,
 )
 from app.utils.payment_mock import build_payment_confirmation
-from app.utils.input_guardrails import validate_chat_history, validate_debt_request
-from app.utils.proposal_tier import max_tier_from_history, suggest_next_tier
+from app.utils.input_guardrails import (
+    auditoria_status_for_block,
+    mask_for_storage,
+    validate_chat_history,
+    validate_debt_request,
+)
+from app.utils.proposal_tier import (
+    extract_proposal_metadata,
+    max_tier_from_history,
+    resolve_agreed_offer,
+    suggest_next_tier,
+)
+
+
+def _cpf_digits(cpf: str) -> str:
+    return re.sub(r"\D", "", cpf or "")
 
 
 def _history_as_dicts(chat_history: list[Any] | None) -> list[dict[str, str]]:
@@ -57,7 +72,14 @@ class CoordinatorAgent:
         llm_metrics: dict | None = None,
         turn_started_at: float | None = None,
         acordo_fechado: bool = False,
+        faixa_proposta: int | None = None,
+        valor_citado: float | None = None,
+        auditoria_json: dict | None = None,
+        proposal_limits: dict | None = None,
     ) -> dict[str, str | dict | float | int | bool]:
+        if faixa_proposta is None and valor_citado is None and proposal_limits:
+            faixa_proposta, valor_citado = extract_proposal_metadata(texto, proposal_limits)
+
         turn_messages = [
             {"role": "user", "content": user_input},
             {"role": "assistant", "content": texto},
@@ -74,6 +96,9 @@ class CoordinatorAgent:
             llm_metrics=metrics,
             custo_estimado_usd=float(metrics.get("custo_estimado_usd") or 0),
             acordo_fechado=acordo_fechado,
+            faixa_proposta=faixa_proposta,
+            valor_citado=valor_citado,
+            auditoria_json=auditoria_json,
         )
         return {
             "texto": texto,
@@ -97,6 +122,36 @@ class CoordinatorAgent:
             return "acordo_concluido"
         return llm_status
 
+    def _finish_blocked(
+        self,
+        client_cpf: str,
+        session_id: str,
+        user_input: str,
+        guard,
+    ) -> dict[str, str]:
+        """Persiste bloqueio de guardrail quando o CPF resolve para um cliente existente."""
+        status = auditoria_status_for_block(guard.reason_code)
+        cpf = guard.cpf_digits or _cpf_digits(client_cpf)
+
+        if len(cpf) == 11 and self.history_store.get_cliente_id(cpf) is not None:
+            self.history_store.save_turn(
+                cpf,
+                session_id,
+                [
+                    {"role": "user", "content": mask_for_storage(user_input)},
+                    {"role": "assistant", "content": guard.user_message},
+                ],
+                status,
+                etapa="bloqueado_entrada",
+                motivo_bloqueio=guard.reason_code or None,
+            )
+
+        return {
+            "texto": guard.user_message,
+            "auditoria_status": status,
+            "session_id": session_id,
+        }
+
     def run(
         self,
         user_input: str,
@@ -111,22 +166,15 @@ class CoordinatorAgent:
         (transcricao_json), agrupado por session_id.
         """
         session_id = (session_id or "").strip() or str(uuid.uuid4())
+        raw_user_input = user_input if isinstance(user_input, str) else str(user_input)
 
-        guard = validate_debt_request(user_input, client_cpf)
+        guard = validate_debt_request(raw_user_input, client_cpf)
         if not guard.ok:
-            return {
-                "texto": guard.user_message,
-                "auditoria_status": "bloqueado_entrada",
-                "session_id": session_id,
-            }
+            return self._finish_blocked(client_cpf, session_id, raw_user_input, guard)
 
         hist_guard = validate_chat_history(chat_history)
         if not hist_guard.ok:
-            return {
-                "texto": hist_guard.user_message,
-                "auditoria_status": "bloqueado_entrada",
-                "session_id": session_id,
-            }
+            return self._finish_blocked(client_cpf, session_id, raw_user_input, hist_guard)
 
         user_input = guard.sanitized_input
         client_cpf = guard.cpf_digits
@@ -166,6 +214,8 @@ class CoordinatorAgent:
             )
 
         if stage == "escolha_pagamento":
+            limits = contexto_financeiro.get("proposal_limits") or {}
+            faixa_acordo, valor_acordo = resolve_agreed_offer(history, limits)
             method = detect_payment_method(user_input)
             if method:
                 texto = build_payment_confirmation(
@@ -173,6 +223,8 @@ class CoordinatorAgent:
                     contexto_financeiro,
                     cpf=client_cpf,
                     session_id=session_id,
+                    agreed_tier=faixa_acordo,
+                    agreed_valor=valor_acordo,
                 )
                 return self._finish_turn(
                     client_cpf,
@@ -184,12 +236,21 @@ class CoordinatorAgent:
                     "pagamento_gerado",
                     turn_started_at=turn_started_at,
                     acordo_fechado=True,
+                    faixa_proposta=faixa_acordo,
+                    valor_citado=valor_acordo or None,
                 )
 
             if last_etapa == "escolha_pagamento":
-                texto = build_payment_method_retry_message(contexto_financeiro)
+                texto = build_payment_method_retry_message(
+                    contexto_financeiro,
+                    agreed_valor=valor_acordo,
+                )
             else:
-                texto = build_scripted_message("escolha_pagamento", contexto_financeiro)
+                texto = build_scripted_message(
+                    "escolha_pagamento",
+                    contexto_financeiro,
+                    agreed_valor=valor_acordo,
+                )
             return self._finish_turn(
                 client_cpf,
                 session_id,
@@ -199,6 +260,8 @@ class CoordinatorAgent:
                 self._audit_status_for_stage(stage, ""),
                 stage,
                 turn_started_at=turn_started_at,
+                faixa_proposta=faixa_acordo,
+                valor_citado=valor_acordo or None,
             )
 
         limits = contexto_financeiro.get("proposal_limits") or {}
@@ -227,11 +290,13 @@ class CoordinatorAgent:
                 stage,
                 turn_metrics,
                 turn_started_at=turn_started_at,
+                proposal_limits=limits,
             )
 
         veredito, auditor_metrics = self.auditor.audit_proposal(proposta_bruta, contexto_financeiro)
         add_agent_metrics(turn_metrics, auditor_metrics)
         if veredito.get("aprovado"):
+            faixa, valor = extract_proposal_metadata(proposta_bruta, limits)
             return self._finish_turn(
                 client_cpf,
                 session_id,
@@ -242,13 +307,27 @@ class CoordinatorAgent:
                 stage,
                 turn_metrics,
                 turn_started_at=turn_started_at,
+                faixa_proposta=faixa,
+                valor_citado=valor,
+                auditoria_json=veredito,
             )
 
         print(f"BLOQUEIO DE AUDITORIA: {veredito.get('motivo_rejeicao', '')}")
         fallback = self.negotiator.generate_safe_fallback(
             contexto_financeiro, min_offer_tier=min_offer_tier
         )
+        faixa, valor = extract_proposal_metadata(fallback, limits)
         return self._finish_turn(
-            client_cpf, session_id, history, user_input, fallback, "ajustado_pos_auditoria", stage,
-            turn_metrics, turn_started_at=turn_started_at,
+            client_cpf,
+            session_id,
+            history,
+            user_input,
+            fallback,
+            "ajustado_pos_auditoria",
+            stage,
+            turn_metrics,
+            turn_started_at=turn_started_at,
+            faixa_proposta=faixa,
+            valor_citado=valor,
+            auditoria_json=veredito,
         )

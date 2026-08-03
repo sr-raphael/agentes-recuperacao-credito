@@ -86,7 +86,7 @@ class NegotiatorAgent:
             valor = proposta_value(limits, tier)
             return (
                 "Entendo. Para seguir com segurança neste canal, mantenho a melhor condição "
-                f"já apresentada (faixa {tier_label(tier)}, total aproximado {format_brl(valor)}). "
+                f"já apresentada (total aproximado {format_brl(valor)}). "
                 "Posso detalhar as formas de pagamento ou esclarecer dúvidas sobre esse valor."
             )
         except Exception:

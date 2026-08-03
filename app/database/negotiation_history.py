@@ -48,6 +48,26 @@ class NegotiationHistoryStore:
                 cur.execute(
                     "ALTER TABLE historico_negociacao ADD COLUMN custo_estimado_usd REAL DEFAULT 0"
                 )
+            if "motivo_bloqueio" not in cols:
+                cur.execute(
+                    "ALTER TABLE historico_negociacao ADD COLUMN motivo_bloqueio TEXT"
+                )
+            if "faixa_proposta" not in cols:
+                cur.execute(
+                    "ALTER TABLE historico_negociacao ADD COLUMN faixa_proposta INTEGER"
+                )
+            if "valor_citado" not in cols:
+                cur.execute(
+                    "ALTER TABLE historico_negociacao ADD COLUMN valor_citado REAL"
+                )
+            if "auditoria_json" not in cols:
+                cur.execute(
+                    "ALTER TABLE historico_negociacao ADD COLUMN auditoria_json JSON"
+                )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_historico_motivo_bloqueio "
+                "ON historico_negociacao(motivo_bloqueio)"
+            )
             cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_historico_cliente_session "
                 "ON historico_negociacao(cliente_id, session_id)"
@@ -77,6 +97,10 @@ class NegotiationHistoryStore:
         acordo_fechado: bool = False,
         llm_metrics: dict | None = None,
         custo_estimado_usd: float = 0.0,
+        motivo_bloqueio: str | None = None,
+        faixa_proposta: int | None = None,
+        valor_citado: float | None = None,
+        auditoria_json: dict | None = None,
     ) -> int | None:
         """Persiste um turno (par user/assistant), sem duplicar mensagens anteriores."""
         cliente_id = self.get_cliente_id(cpf)
@@ -91,8 +115,9 @@ class NegotiationHistoryStore:
                 INSERT INTO historico_negociacao (
                     cliente_id, session_id, etapa, transcricao_json,
                     llm_metrics_json, custo_estimado_usd,
-                    acordo_fechado, resultado_auditoria
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    acordo_fechado, resultado_auditoria,
+                    motivo_bloqueio, faixa_proposta, valor_citado, auditoria_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     cliente_id,
@@ -103,6 +128,12 @@ class NegotiationHistoryStore:
                     float(custo_estimado_usd or 0),
                     int(acordo_fechado),
                     resultado_auditoria,
+                    motivo_bloqueio,
+                    faixa_proposta,
+                    float(valor_citado) if valor_citado is not None else None,
+                    json.dumps(auditoria_json, ensure_ascii=False)
+                    if auditoria_json
+                    else None,
                 ),
             )
             conn.commit()
@@ -187,6 +218,89 @@ class NegotiationHistoryStore:
             transcript: list[dict[str, str]] = []
             for chunk in chunks:
                 transcript.extend(chunk)
+            return transcript or None
+        finally:
+            conn.close()
+
+    def get_session_history_messages(
+        self, cpf: str, session_id: str
+    ) -> list[dict[str, str]] | None:
+        """Transcrição da sessão com etapa e resultado_auditoria nas mensagens assistant."""
+        cliente_id = self.get_cliente_id(cpf)
+        if cliente_id is None:
+            return None
+
+        conn = sqlite3.connect(self.db_path)
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT transcricao_json, etapa, resultado_auditoria,
+                       faixa_proposta, valor_citado, auditoria_json
+                FROM historico_negociacao
+                WHERE cliente_id = ? AND session_id = ?
+                ORDER BY id ASC
+                """,
+                (cliente_id, session_id),
+            )
+            rows = cur.fetchall()
+            if not rows:
+                return None
+
+            turns: list[tuple[list[dict[str, str]], str, str, int | None, float | None, dict | None]] = []
+            for row in rows:
+                if not row or not row[0]:
+                    continue
+                data = json.loads(row[0])
+                if not isinstance(data, list):
+                    continue
+                chunk = self._normalize_messages(data)
+                if not chunk:
+                    continue
+                etapa = str(row[1] or "")
+                resultado = str(row[2] or "")
+                faixa = int(row[3]) if row[3] is not None else None
+                valor = float(row[4]) if row[4] is not None else None
+                audit_raw = row[5] if len(row) > 5 else None
+                audit: dict | None = None
+                if audit_raw:
+                    try:
+                        audit = json.loads(audit_raw) if isinstance(audit_raw, str) else audit_raw
+                    except (json.JSONDecodeError, TypeError):
+                        audit = None
+                turns.append((chunk, etapa, resultado, faixa, valor, audit))
+
+            if not turns:
+                return None
+
+            chunks = [t[0] for t in turns]
+            lengths = [len(c) for c in chunks]
+            if (
+                len(lengths) >= 2
+                and lengths[-1] > 2
+                and all(lengths[i] <= lengths[i + 1] for i in range(len(lengths) - 1))
+            ):
+                return chunks[-1]
+
+            transcript: list[dict[str, str]] = []
+            for chunk, etapa, resultado, faixa, valor, audit in turns:
+                for msg in chunk:
+                    if msg.get("role") == "assistant":
+                        entry: dict[str, Any] = {
+                            **msg,
+                            "etapa": etapa,
+                            "resultado_auditoria": resultado,
+                        }
+                        if faixa is not None:
+                            entry["faixa_proposta"] = faixa
+                        if valor is not None:
+                            entry["valor_citado"] = valor
+                        if audit is not None:
+                            entry["auditoria_json"] = audit
+                        transcript.append(entry)
+                    else:
+                        transcript.append(msg)
+
             return transcript or None
         finally:
             conn.close()

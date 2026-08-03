@@ -46,6 +46,10 @@ CREATE TABLE IF NOT EXISTS historico_negociacao (
     custo_estimado_usd REAL DEFAULT 0,
     acordo_fechado BOOLEAN DEFAULT FALSE,
     resultado_auditoria TEXT,
+    motivo_bloqueio TEXT,
+    faixa_proposta INTEGER,
+    valor_citado REAL,
+    auditoria_json JSON,
     FOREIGN KEY (cliente_id) REFERENCES clientes (id)
 );
 
