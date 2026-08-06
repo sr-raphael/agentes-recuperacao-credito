@@ -2,8 +2,6 @@ const API_URL = "/v1/negociar";
 const HISTORY_URL = "/v1/negociar/historico";
 const SESSIONS_URL = "/v1/negociar/sessoes";
 const LOGIN_URL = "/v1/auth/login";
-const SESSION_STORAGE_KEY = "chat_session_id";
-const TOKEN_STORAGE_KEY = "chat_access_token";
 
 const messagesEl = document.getElementById("messages");
 const formEl = document.getElementById("chat-form");
@@ -17,8 +15,8 @@ const typingEl = document.getElementById("typing");
 
 /** @type {{ role: 'user' | 'assistant', content: string }[]} */
 let historico = [];
-let sessionId = localStorage.getItem(SESSION_STORAGE_KEY) || crypto.randomUUID();
-let accessToken = localStorage.getItem(TOKEN_STORAGE_KEY) || "";
+let sessionId = crypto.randomUUID();
+let accessToken = "";
 
 function onlyDigits(value) {
   return (value || "").replace(/\D/g, "");
@@ -28,21 +26,8 @@ function formatTime(date = new Date()) {
   return date.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
 }
 
-function persistSessionId() {
-  localStorage.setItem(SESSION_STORAGE_KEY, sessionId);
-}
-
-function persistToken() {
-  if (accessToken) {
-    localStorage.setItem(TOKEN_STORAGE_KEY, accessToken);
-  } else {
-    localStorage.removeItem(TOKEN_STORAGE_KEY);
-  }
-}
-
 function newSession() {
   sessionId = crypto.randomUUID();
-  persistSessionId();
 }
 
 function authHeaders(extra = {}) {
@@ -74,13 +59,29 @@ function clearMessagesUi() {
   messagesEl.innerHTML = "";
 }
 
+function escapeHtml(text) {
+  return String(text || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+/** Converte **negrito** e quebras de linha (markdown leve do agente). */
+function formatMessageHtml(content) {
+  let safe = escapeHtml(content);
+  safe = safe.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+  safe = safe.replace(/\n/g, "<br>");
+  return safe;
+}
+
 function appendMessage(role, content, meta = "") {
   const row = document.createElement("div");
   row.className = `row row--${role === "user" ? "user" : "agent"}`;
 
   const bubble = document.createElement("div");
   bubble.className = "bubble";
-  bubble.textContent = content;
+  bubble.innerHTML = formatMessageHtml(content);
 
   if (meta) {
     const metaEl = document.createElement("span");
@@ -105,16 +106,6 @@ function appendSystem(text, isError = false) {
   scrollToBottom();
 }
 
-function renderHistorico(messages) {
-  clearMessagesUi();
-  historico = [];
-  for (const msg of messages) {
-    const role = msg.role === "user" ? "user" : "assistant";
-    appendMessage(role, msg.content);
-    historico.push({ role: msg.role, content: msg.content });
-  }
-}
-
 function setLoading(loading) {
   btnSend.disabled = loading || !isAuthenticated();
   inputEl.disabled = loading || !isAuthenticated();
@@ -122,33 +113,55 @@ function setLoading(loading) {
   typingEl.setAttribute("aria-hidden", loading ? "false" : "true");
 }
 
-async function loadSessionFromServer() {
-  if (!isAuthenticated()) return;
+function renderHistorico(messages) {
+  clearMessagesUi();
+  historico = [];
+  for (const msg of messages) {
+    const role = msg.role === "user" ? "user" : "assistant";
+    let meta = "";
+    if (role === "assistant" && msg.resultado_auditoria) {
+      meta = msg.resultado_auditoria;
+      if (msg.etapa) meta += ` · ${msg.etapa}`;
+    }
+    appendMessage(role, msg.content, meta);
+    historico.push({ role: msg.role, content: msg.content });
+  }
+}
 
-  const cpf = onlyDigits(cpfEl.value);
-  if (cpf.length !== 11) return;
-
+/** Após login: retoma a sessão mais recente do CPF no banco, se existir. */
+async function loadLatestSessionAfterLogin(cpf) {
   try {
-    const params = new URLSearchParams({ cpf, session_id: sessionId });
-    const res = await fetch(`${HISTORY_URL}?${params}`, { headers: authHeaders() });
-    if (res.status === 401) {
+    const listParams = new URLSearchParams({ cpf, limit: "1" });
+    const listRes = await fetch(`${SESSIONS_URL}?${listParams}`, {
+      headers: authHeaders(),
+    });
+    if (listRes.status === 401) {
       logout();
-      appendSystem("Sessão expirada. Faça login novamente.", true);
-      return;
+      appendSystem("Token inválido. Faça login novamente.", true);
+      return false;
     }
-    if (!res.ok) return;
+    if (!listRes.ok) return false;
 
-    const data = await res.json();
-    if (data.session_id) {
-      sessionId = data.session_id;
-      persistSessionId();
+    const listData = await listRes.json();
+    const latest = Array.isArray(listData.sessoes) ? listData.sessoes[0] : null;
+    if (!latest?.session_id) return false;
+
+    sessionId = latest.session_id;
+    const histParams = new URLSearchParams({ cpf, session_id: sessionId });
+    const histRes = await fetch(`${HISTORY_URL}?${histParams}`, {
+      headers: authHeaders(),
+    });
+    if (!histRes.ok) return false;
+
+    const histData = await histRes.json();
+    if (!Array.isArray(histData.mensagens) || histData.mensagens.length === 0) {
+      return false;
     }
-    if (Array.isArray(data.mensagens) && data.mensagens.length > 0) {
-      renderHistorico(data.mensagens);
-      appendSystem("Conversa restaurada do banco de dados.");
-    }
+
+    renderHistorico(histData.mensagens);
+    return true;
   } catch {
-    /* ignora falha silenciosa no restore */
+    return false;
   }
 }
 
@@ -184,22 +197,28 @@ async function login() {
     }
 
     accessToken = data.access_token || "";
-    persistToken();
     if (data.cpf) {
       cpfEl.value = data.cpf;
     }
 
     historico = [];
     clearMessagesUi();
-    newSession();
     setAuthenticatedUI(true);
     senhaEl.value = "";
 
     const horas = Math.round((data.expires_in || 3600) / 3600);
-    appendSystem(
-      `Autenticado com sucesso. Token válido por ${horas} hora(s). Envie uma mensagem para começar.`
-    );
-    await loadSessionFromServer();
+    const restored = await loadLatestSessionAfterLogin(onlyDigits(cpfEl.value));
+
+    if (restored) {
+      appendSystem(
+        `Autenticado (token válido por ${horas} hora(s)). Conversa anterior restaurada — continue de onde parou.`
+      );
+    } else {
+      newSession();
+      appendSystem(
+        `Autenticado com sucesso. Token válido por ${horas} hora(s). Envie uma mensagem para começar.`
+      );
+    }
   } catch {
     appendSystem("Erro de conexão ao autenticar.", true);
   } finally {
@@ -211,11 +230,12 @@ async function login() {
 
 function logout() {
   accessToken = "";
-  persistToken();
   historico = [];
   clearMessagesUi();
   newSession();
   setAuthenticatedUI(false);
+  cpfEl.value = "";
+  senhaEl.value = "";
 }
 
 async function sair() {
@@ -234,12 +254,13 @@ async function sair() {
   }
 
   accessToken = "";
-  persistToken();
   historico = [];
   clearMessagesUi();
   newSession();
   setAuthenticatedUI(false);
-  appendSystem("Você saiu. Histórico local limpo.");
+  cpfEl.value = "";
+  senhaEl.value = "";
+  appendSystem("Você saiu. Informe CPF e senha para entrar novamente.");
 }
 
 async function sendMessage(text) {
@@ -291,7 +312,6 @@ async function sendMessage(text) {
 
     if (data.session_id) {
       sessionId = data.session_id;
-      persistSessionId();
     }
 
     const resposta = data.resposta || "(sem resposta)";
@@ -344,14 +364,11 @@ senhaEl.addEventListener("keydown", (e) => {
 btnEntrar.addEventListener("click", () => login());
 btnSair.addEventListener("click", () => sair());
 
-persistSessionId();
-setAuthenticatedUI(isAuthenticated());
+// Limpa tokens/sessões antigos gravados em versões anteriores do chat.
+localStorage.removeItem("chat_session_id");
+localStorage.removeItem("chat_access_token");
 
-if (isAuthenticated()) {
-  appendSystem("Sessão restaurada. Você já está autenticado.");
-  loadSessionFromServer();
-} else {
-  appendSystem(
-    "Informe CPF e senha do cliente (seed: 12345) e clique em Entrar."
-  );
-}
+setAuthenticatedUI(false);
+appendSystem(
+  "Informe CPF e senha do cliente (seed: 12345) e clique em Entrar."
+);

@@ -29,9 +29,7 @@ CREATE TABLE IF NOT EXISTS politicas_negociacao (
     atraso_min INTEGER NOT NULL,
     atraso_max INTEGER NOT NULL,
     perc_desc_principal_max REAL NOT NULL,
-    perc_desc_juros_max REAL NOT NULL,
-    altera_prazo BOOLEAN NOT NULL,
-    max_prazo INTEGER NOT NULL
+    perc_desc_juros_max REAL NOT NULL
 );
 
 -- Tabela de Logs de Negociação (uma linha por turno; transcricao_json = par user/assistant do turno)

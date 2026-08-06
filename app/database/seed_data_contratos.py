@@ -5,8 +5,8 @@ CONTRATOS = [
         "valor_original": 35000.00,
         "juros_acumulado": 100.00,
         "numero_parcelas": 24,
-        "parcelas_abertas": 4,
-        "dias_atraso": 6,
+        "parcelas_abertas": 1,
+        "dias_atraso": 8,
         "situacao": "ABERTO",
     },
     # Cliente 2: Bom score, atraso longo
@@ -15,8 +15,8 @@ CONTRATOS = [
         "valor_original": 10000.00,
         "juros_acumulado": 80.00,
         "numero_parcelas": 36,
-        "parcelas_abertas": 8,
-        "dias_atraso": 70,
+        "parcelas_abertas": 7,
+        "dias_atraso": 215,
         "situacao": "ABERTO",
     },
     # Cliente 3: Score medio, atraso curto
@@ -25,8 +25,8 @@ CONTRATOS = [
         "valor_original": 6000.00,
         "juros_acumulado": 150.00,
         "numero_parcelas": 24,
-        "parcelas_abertas": 12,
-        "dias_atraso": 11,
+        "parcelas_abertas": 1,
+        "dias_atraso": 15,
         "situacao": "ABERTO",
     },
     # Cliente 4: Score medio, atraso longo
@@ -35,8 +35,8 @@ CONTRATOS = [
         "valor_original": 80000.00,
         "juros_acumulado": 350.00,
         "numero_parcelas": 24,
-        "parcelas_abertas": 20,
-        "dias_atraso": 94,
+        "parcelas_abertas": 13,
+        "dias_atraso": 394,
         "situacao": "ABERTO",
     },
     # Cliente 5: Score baixo, atraso curto
@@ -45,8 +45,8 @@ CONTRATOS = [
         "valor_original": 5500.00,
         "juros_acumulado": 120.00,
         "numero_parcelas": 36,
-        "parcelas_abertas": 10,
-        "dias_atraso": 13,
+        "parcelas_abertas": 1,
+        "dias_atraso": 14,
         "situacao": "ABERTO",
     },
     # Cliente 6: Score baixo, atraso longo
@@ -56,7 +56,7 @@ CONTRATOS = [
         "juros_acumulado": 1500.00,
         "numero_parcelas": 36,
         "parcelas_abertas": 32,
-        "dias_atraso": 540,
+        "dias_atraso": 972,
         "situacao": "ABERTO",
     },
    

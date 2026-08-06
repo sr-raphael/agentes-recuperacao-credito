@@ -70,8 +70,8 @@ def seed_politicas(cursor: sqlite3.Cursor) -> None:
         """
         INSERT INTO politicas_negociacao (
             descricao, score_min, score_max, atraso_min, atraso_max,
-            perc_desc_principal_max, perc_desc_juros_max, altera_prazo, max_prazo
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            perc_desc_principal_max, perc_desc_juros_max
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
         """,
         POLITICAS,
     )

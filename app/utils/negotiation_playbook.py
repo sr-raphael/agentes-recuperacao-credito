@@ -109,11 +109,11 @@ def build_scripted_message(
         return (
             f"{nome}, segue o resumo do seu contrato:\n"
             f"• Situação: {situacao}\n"
+            f"• Parcelas em aberto: {parcelas_abertas}\n\n"
             f"• Dias em atraso: {dias_atraso}\n"
             f"• Valor original: {format_brl(valor)}\n"
             f"• Juros acumulados: {format_brl(juros)}\n"
             f"• Total em aberto: {format_brl(total)}\n"
-            f"• Parcelas em aberto: {parcelas_abertas} de {numero_parcelas}\n\n"
             "Deseja que eu apresente opções para regularizar essa dívida?"
         )
 

@@ -110,11 +110,11 @@ class NegotiatorAgent:
 DADOS DO CONTRATO:
 - Nome: {nome}
 - Score: {contract.get('score', '—')}
+- Parcelas em aberto: {contract.get('parcelas_abertas')}
 - Dias em atraso: {contract.get('dias_atraso', '—')}
 - Situação: {contract.get('situacao', '—')}
 - Valor original: R$ {contract.get('valor_original', 0)}
 - Juros acumulados: R$ {contract.get('juros_acumulado', 0)}
-- Parcelas em aberto: {contract.get('parcelas_abertas')} de {contract.get('numero_parcelas')}
 
 LIMITES DE PROPOSTA (não ultrapassar):
 - Conservadora (proposta_1): {limits.get('proposta_1')}

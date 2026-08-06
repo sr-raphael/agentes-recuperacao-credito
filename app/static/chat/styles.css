@@ -155,8 +155,12 @@ body {
   box-shadow: var(--shadow);
   font-size: 0.95rem;
   line-height: 1.45;
-  white-space: pre-wrap;
+  white-space: normal;
   word-break: break-word;
+}
+
+.bubble strong {
+  font-weight: 700;
 }
 
 .row--agent .bubble {

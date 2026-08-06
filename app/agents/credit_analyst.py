@@ -40,8 +40,7 @@ class CreditAnalystAgent:
         cursor = conn.cursor()
 
         query = """
-            SELECT descricao, perc_desc_principal_max, perc_desc_juros_max,
-                   altera_prazo, max_prazo
+            SELECT descricao, perc_desc_principal_max, perc_desc_juros_max
             FROM politicas_negociacao
             WHERE ? BETWEEN score_min AND score_max
             AND ? BETWEEN atraso_min AND atraso_max
