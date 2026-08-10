@@ -1,6 +1,4 @@
 const API_URL = "/v1/negociar";
-const HISTORY_URL = "/v1/negociar/historico";
-const SESSIONS_URL = "/v1/negociar/sessoes";
 const LOGIN_URL = "/v1/auth/login";
 
 const messagesEl = document.getElementById("messages");
@@ -113,58 +111,6 @@ function setLoading(loading) {
   typingEl.setAttribute("aria-hidden", loading ? "false" : "true");
 }
 
-function renderHistorico(messages) {
-  clearMessagesUi();
-  historico = [];
-  for (const msg of messages) {
-    const role = msg.role === "user" ? "user" : "assistant";
-    let meta = "";
-    if (role === "assistant" && msg.resultado_auditoria) {
-      meta = msg.resultado_auditoria;
-      if (msg.etapa) meta += ` · ${msg.etapa}`;
-    }
-    appendMessage(role, msg.content, meta);
-    historico.push({ role: msg.role, content: msg.content });
-  }
-}
-
-/** Após login: retoma a sessão mais recente do CPF no banco, se existir. */
-async function loadLatestSessionAfterLogin(cpf) {
-  try {
-    const listParams = new URLSearchParams({ cpf, limit: "1" });
-    const listRes = await fetch(`${SESSIONS_URL}?${listParams}`, {
-      headers: authHeaders(),
-    });
-    if (listRes.status === 401) {
-      logout();
-      appendSystem("Token inválido. Faça login novamente.", true);
-      return false;
-    }
-    if (!listRes.ok) return false;
-
-    const listData = await listRes.json();
-    const latest = Array.isArray(listData.sessoes) ? listData.sessoes[0] : null;
-    if (!latest?.session_id) return false;
-
-    sessionId = latest.session_id;
-    const histParams = new URLSearchParams({ cpf, session_id: sessionId });
-    const histRes = await fetch(`${HISTORY_URL}?${histParams}`, {
-      headers: authHeaders(),
-    });
-    if (!histRes.ok) return false;
-
-    const histData = await histRes.json();
-    if (!Array.isArray(histData.mensagens) || histData.mensagens.length === 0) {
-      return false;
-    }
-
-    renderHistorico(histData.mensagens);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 async function login() {
   const cpf = onlyDigits(cpfEl.value);
   const senha = (senhaEl.value || "").trim();
@@ -203,22 +149,14 @@ async function login() {
 
     historico = [];
     clearMessagesUi();
+    newSession();
     setAuthenticatedUI(true);
     senhaEl.value = "";
 
     const horas = Math.round((data.expires_in || 3600) / 3600);
-    const restored = await loadLatestSessionAfterLogin(onlyDigits(cpfEl.value));
-
-    if (restored) {
-      appendSystem(
-        `Autenticado (token válido por ${horas} hora(s)). Conversa anterior restaurada — continue de onde parou.`
-      );
-    } else {
-      newSession();
-      appendSystem(
-        `Autenticado com sucesso. Token válido por ${horas} hora(s). Envie uma mensagem para começar.`
-      );
-    }
+    appendSystem(
+      `Autenticado com sucesso. Nova conversa iniciada. Token válido por ${horas} hora(s).`
+    );
   } catch {
     appendSystem("Erro de conexão ao autenticar.", true);
   } finally {
@@ -239,20 +177,6 @@ function logout() {
 }
 
 async function sair() {
-  const cpf = onlyDigits(cpfEl.value);
-
-  if (cpf.length === 11 && isAuthenticated()) {
-    try {
-      const params = new URLSearchParams({ cpf });
-      await fetch(`${SESSIONS_URL}?${params}`, {
-        method: "DELETE",
-        headers: authHeaders(),
-      });
-    } catch {
-      /* segue logout local */
-    }
-  }
-
   accessToken = "";
   historico = [];
   clearMessagesUi();

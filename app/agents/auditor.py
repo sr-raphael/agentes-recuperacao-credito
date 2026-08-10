@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import time
 from pathlib import Path
@@ -8,6 +9,11 @@ from langchain_core.messages import HumanMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
 
 from app.utils.llm_metrics import extract_agent_metrics
+from app.utils.llm_models import extract_llm_text, extract_response_text, parse_model_json
+
+logger = logging.getLogger(__name__)
+
+_AUDITOR_PARSE_ERROR = "Erro ao processar veredito do auditor."
 
 _AUDITOR_PROMPT_PATH = Path(__file__).resolve().parent / "prompts" / "auditor_prompt.txt"
 
@@ -41,15 +47,25 @@ class AuditorAgent:
         latencia_ms = round((time.perf_counter() - t0) * 1000)
         metrics = extract_agent_metrics(response, "auditor", self.model_name, latencia_ms)
 
+        raw_text = extract_response_text(response, self.model_name)
         try:
-            raw = response.content.replace("```json", "").replace("```", "")
-            return json.loads(raw), metrics
-        except (json.JSONDecodeError, TypeError, AttributeError):
+            return parse_model_json(raw_text, self.model_name), metrics
+        except (json.JSONDecodeError, TypeError, ValueError) as exc:
+            logger.warning(
+                "Falha ao parsear veredito do auditor (%s): %s",
+                type(exc).__name__,
+                exc,
+            )
+            logger.warning("Resposta bruta do auditor: %s", raw_text)
             return {
                 "aprovado": False,
-                "motivo_rejeicao": "Erro ao processar veredito do auditor.",
+                "motivo_rejeicao": _AUDITOR_PARSE_ERROR,
                 "risco_detectado": "alto",
             }, metrics
+
+    @staticmethod
+    def is_parse_failure(veredito: dict) -> bool:
+        return veredito.get("motivo_rejeicao") == _AUDITOR_PARSE_ERROR
 
     def _build_audit_prompt(self, response, limits: dict) -> str:
         limits_view = {
@@ -59,5 +75,5 @@ class AuditorAgent:
         template = _AUDITOR_PROMPT_PATH.read_text(encoding="utf-8")
         return template.format(
             limites_tool=json.dumps(limits_view, ensure_ascii=False, indent=2),
-            resposta_negociador=str(response or ""),
+            resposta_negociador=extract_llm_text(response),
         )

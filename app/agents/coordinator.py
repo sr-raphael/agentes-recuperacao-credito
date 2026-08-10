@@ -1,3 +1,4 @@
+import logging
 import re
 import time
 import uuid
@@ -30,6 +31,18 @@ from app.utils.proposal_tier import (
     resolve_agreed_offer,
     suggest_next_tier,
 )
+
+logger = logging.getLogger(__name__)
+MAX_NEGOTIATOR_RETRIES = 1
+
+
+def _log_audit_rejection(proposta: str, veredito: dict, phase: str) -> None:
+    logger.warning(
+        "BLOQUEIO DE AUDITORIA (%s): %s",
+        phase,
+        veredito.get("motivo_rejeicao", ""),
+    )
+    logger.warning("Resposta do negociador: %s", proposta)
 
 
 def _cpf_digits(cpf: str) -> str:
@@ -121,6 +134,100 @@ class CoordinatorAgent:
         if stage == "pagamento_gerado":
             return "acordo_concluido"
         return llm_status
+
+    def _run_audited_negotiation(
+        self,
+        *,
+        client_cpf: str,
+        session_id: str,
+        history: list[dict[str, str]],
+        user_input: str,
+        contexto_financeiro: dict,
+        stage: NegotiationStage,
+        limits: dict,
+        min_offer_tier: int,
+        target_tier: int,
+        turn_started_at: float,
+    ) -> dict[str, str | dict | float | int | bool]:
+        proposta, negociador_metrics = self.negotiator.generate_response(
+            user_input,
+            contexto_financeiro,
+            history,
+            playbook_stage=stage,
+            min_offer_tier=min_offer_tier,
+            target_tier=target_tier,
+        )
+        logger.info("Proposta inicial do negociador: %s", proposta)
+        turn_metrics = empty_turn_metrics()
+        add_agent_metrics(turn_metrics, negociador_metrics)
+
+        veredito, auditor_metrics = self.auditor.audit_proposal(
+            proposta, contexto_financeiro
+        )
+        add_agent_metrics(turn_metrics, auditor_metrics)
+
+        retries_left = MAX_NEGOTIATOR_RETRIES
+        while (
+            not veredito.get("aprovado")
+            and retries_left > 0
+            and not AuditorAgent.is_parse_failure(veredito)
+        ):
+            _log_audit_rejection(proposta, veredito, "retry negociador")
+            proposta, negociador_metrics = self.negotiator.generate_response(
+                user_input,
+                contexto_financeiro,
+                history,
+                playbook_stage=stage,
+                min_offer_tier=min_offer_tier,
+                target_tier=target_tier,
+                revision_context={
+                    "rejected_response": proposta,
+                    "audit_verdict": veredito,
+                },
+            )
+            add_agent_metrics(turn_metrics, negociador_metrics)
+            veredito, auditor_metrics = self.auditor.audit_proposal(
+                proposta, contexto_financeiro
+            )
+            add_agent_metrics(turn_metrics, auditor_metrics)
+            retries_left -= 1
+
+        if veredito.get("aprovado"):
+            faixa, valor = extract_proposal_metadata(proposta, limits)
+            return self._finish_turn(
+                client_cpf,
+                session_id,
+                history,
+                user_input,
+                proposta,
+                self._audit_status_for_stage(stage, "aprovado"),
+                stage,
+                turn_metrics,
+                turn_started_at=turn_started_at,
+                faixa_proposta=faixa,
+                valor_citado=valor,
+                auditoria_json=veredito,
+            )
+
+        _log_audit_rejection(proposta, veredito, "fallback")
+        fallback = self.negotiator.generate_safe_fallback(
+            contexto_financeiro, min_offer_tier=min_offer_tier
+        )
+        faixa, valor = extract_proposal_metadata(fallback, limits)
+        return self._finish_turn(
+            client_cpf,
+            session_id,
+            history,
+            user_input,
+            fallback,
+            "ajustado_pos_auditoria",
+            stage,
+            turn_metrics,
+            turn_started_at=turn_started_at,
+            faixa_proposta=faixa,
+            valor_citado=valor,
+            auditoria_json=veredito,
+        )
 
     def _finish_blocked(
         self,
@@ -268,6 +375,20 @@ class CoordinatorAgent:
         min_offer_tier = max_tier_from_history(history, limits)
         target_tier = suggest_next_tier(min_offer_tier, user_input)
 
+        if requires_compliance_audit_for_stage(stage):
+            return self._run_audited_negotiation(
+                client_cpf=client_cpf,
+                session_id=session_id,
+                history=history,
+                user_input=user_input,
+                contexto_financeiro=contexto_financeiro,
+                stage=stage,
+                limits=limits,
+                min_offer_tier=min_offer_tier,
+                target_tier=target_tier,
+                turn_started_at=turn_started_at,
+            )
+
         proposta_bruta, negociador_metrics = self.negotiator.generate_response(
             user_input,
             contexto_financeiro,
@@ -278,56 +399,15 @@ class CoordinatorAgent:
         )
         turn_metrics = empty_turn_metrics()
         add_agent_metrics(turn_metrics, negociador_metrics)
-
-        if not requires_compliance_audit_for_stage(stage):
-            return self._finish_turn(
-                client_cpf,
-                session_id,
-                history,
-                user_input,
-                proposta_bruta,
-                self._audit_status_for_stage(stage, ""),
-                stage,
-                turn_metrics,
-                turn_started_at=turn_started_at,
-                proposal_limits=limits,
-            )
-
-        veredito, auditor_metrics = self.auditor.audit_proposal(proposta_bruta, contexto_financeiro)
-        add_agent_metrics(turn_metrics, auditor_metrics)
-        if veredito.get("aprovado"):
-            faixa, valor = extract_proposal_metadata(proposta_bruta, limits)
-            return self._finish_turn(
-                client_cpf,
-                session_id,
-                history,
-                user_input,
-                proposta_bruta,
-                self._audit_status_for_stage(stage, "aprovado"),
-                stage,
-                turn_metrics,
-                turn_started_at=turn_started_at,
-                faixa_proposta=faixa,
-                valor_citado=valor,
-                auditoria_json=veredito,
-            )
-
-        print(f"BLOQUEIO DE AUDITORIA: {veredito.get('motivo_rejeicao', '')}")
-        fallback = self.negotiator.generate_safe_fallback(
-            contexto_financeiro, min_offer_tier=min_offer_tier
-        )
-        faixa, valor = extract_proposal_metadata(fallback, limits)
         return self._finish_turn(
             client_cpf,
             session_id,
             history,
             user_input,
-            fallback,
-            "ajustado_pos_auditoria",
+            proposta_bruta,
+            self._audit_status_for_stage(stage, ""),
             stage,
             turn_metrics,
             turn_started_at=turn_started_at,
-            faixa_proposta=faixa,
-            valor_citado=valor,
-            auditoria_json=veredito,
+            proposal_limits=limits,
         )

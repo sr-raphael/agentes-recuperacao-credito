@@ -8,6 +8,7 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 from langchain_google_genai import ChatGoogleGenerativeAI
 
 from app.utils.llm_metrics import extract_agent_metrics
+from app.utils.llm_models import extract_llm_text, extract_response_text
 from app.utils.negotiation_playbook import (
     NegotiationStage,
     STAGE_LABELS,
@@ -51,12 +52,14 @@ class NegotiatorAgent:
         playbook_stage: NegotiationStage = "negociacao",
         min_offer_tier: int = 1,
         target_tier: int = 1,
+        revision_context: dict | None = None,
     ):
         """
         user_message: última mensagem do cliente
         credit_context: JSON do Agente de Crédito
         chat_history: mensagens anteriores
         playbook_stage: saudacao | detalhamento | negociacao
+        revision_context: {rejected_response, audit_verdict} quando o auditor rejeitou
         """
         if playbook_stage in ("saudacao", "detalhamento"):
             return build_scripted_message(playbook_stage, credit_context), None
@@ -65,6 +68,11 @@ class NegotiatorAgent:
             credit_context, playbook_stage, min_offer_tier, target_tier
         )
         messages = [SystemMessage(content=system_prompt)]
+
+        if revision_context:
+            messages.append(
+                HumanMessage(content=self._build_revision_feedback(revision_context))
+            )
 
         for msg in (chat_history or [])[-5:]:
             messages.append(_to_lc_message(msg))
@@ -76,7 +84,27 @@ class NegotiatorAgent:
         metrics = extract_agent_metrics(
             response, "negociador", self.model_name, latencia_ms
         )
-        return response.content, metrics
+        return extract_response_text(response, self.model_name), metrics
+
+    @staticmethod
+    def _build_revision_feedback(revision_context: dict) -> str:
+        rejected = extract_llm_text(revision_context.get("rejected_response")).strip()
+        veredito = revision_context.get("audit_verdict") or {}
+        motivo = str(veredito.get("motivo_rejeicao") or "Rejeição sem motivo informado.").strip()
+        correcao = veredito.get("correcao_sugerida")
+        parts = [
+            "### REVISÃO OBRIGATÓRIA (auditor rejeitou sua resposta anterior)",
+            f"Motivo: {motivo}",
+        ]
+        if correcao:
+            parts.append(f"Correção sugerida: {correcao}")
+        if rejected:
+            parts.append(f"\nSua resposta rejeitada foi:\n{rejected}")
+        parts.append(
+            "\nRefaça a mensagem ao cliente corrigindo os pontos acima, "
+            "respeitando os limites de proposta e o tom profissional."
+        )
+        return "\n".join(parts)
 
     def generate_safe_fallback(self, context, *, min_offer_tier: int = 1):
         """Resposta determinística quando o auditor bloqueia — mantém a melhor faixa já ofertada."""
