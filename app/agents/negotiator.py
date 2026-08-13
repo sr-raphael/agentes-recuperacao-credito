@@ -17,6 +17,12 @@ from app.utils.negotiation_playbook import (
 )
 from app.utils.proposal_tier import proposta_value, tier_label
 
+_TIER_DISPLAY = (
+    (1, "Conservadora", "proposta_1"),
+    (2, "Intermediária", "proposta_2"),
+    (3, "Limite final", "proposta_3"),
+)
+
 _NEGOTIATOR_PROMPT_PATH = Path(__file__).resolve().parent / "prompts" / "negotiator_prompt.txt"
 
 
@@ -106,22 +112,42 @@ class NegotiatorAgent:
         )
         return "\n".join(parts)
 
-    def generate_safe_fallback(self, context, *, min_offer_tier: int = 1):
+    def generate_safe_fallback(self, context, *, min_offer_tier: int = 1, closing: bool = False):
         """Resposta determinística quando o auditor bloqueia — mantém a melhor faixa já ofertada."""
         try:
             limits = context.get("proposal_limits") or context
             tier = max(1, min(3, min_offer_tier))
             valor = proposta_value(limits, tier)
+            if closing:
+                return (
+                    f"Perfeito, acordo fechado no valor de {format_brl(valor)} para pagamento à vista. "
+                    "Parabéns por regularizar sua situação financeira conosco hoje. "
+                    "O documento para pagamento será gerado e enviado para o seu contato cadastrado."
+                )
             return (
                 "Entendo. Para seguir com segurança neste canal, mantenho a melhor condição "
                 f"já apresentada (total aproximado {format_brl(valor)}). "
-                "Posso detalhar as formas de pagamento ou esclarecer dúvidas sobre esse valor."
+                "Posso esclarecer dúvidas sobre esse valor ou aguardar sua decisão."
             )
         except Exception:
             return (
                 "Não foi possível concluir essa resposta automaticamente. "
                 "Um atendente dará continuidade à sua negociação com segurança."
             )
+
+    @staticmethod
+    def _format_limits_block(limits: dict, max_visible_tier: int) -> str:
+        lines: list[str] = []
+        for tier, label, key in _TIER_DISPLAY:
+            if tier > max_visible_tier:
+                break
+            lines.append(f"- {label} ({key}): {limits.get(key)}")
+        if max_visible_tier < 3:
+            lines.append(
+                f"- Faixas {max_visible_tier + 1}–3: bloqueadas neste turno "
+                "(liberadas somente se o cliente recusar o valor ofertado)."
+            )
+        return "\n".join(lines)
 
     def _build_system_prompt(
         self,
@@ -134,6 +160,10 @@ class NegotiatorAgent:
         limits = context.get("proposal_limits") or {}
 
         nome = contract.get("nome", "Cliente")
+        min_t = max(1, min(3, min_offer_tier))
+        target_t = max(min_t, min(3, target_tier))
+        limits_block = self._format_limits_block(limits, target_t)
+
         contexto_credito = f"""
 DADOS DO CONTRATO:
 - Nome: {nome}
@@ -144,34 +174,58 @@ DADOS DO CONTRATO:
 - Valor original: R$ {contract.get('valor_original', 0)}
 - Juros acumulados: R$ {contract.get('juros_acumulado', 0)}
 
-LIMITES DE PROPOSTA (não ultrapassar):
-- Conservadora (proposta_1): {limits.get('proposta_1')}
-- Intermediária (proposta_2): {limits.get('proposta_2')}
-- Limite final (proposta_3): {limits.get('proposta_3')}
+LIMITES DE PROPOSTA (não ultrapassar neste turno):
+{limits_block}
 """
 
-        min_t = max(1, min(3, min_offer_tier))
-        target_t = max(min_t, min(3, target_tier))
         target_key = f"proposta_{target_t}"
+        valor_acordado = format_brl(proposta_value(limits, target_t))
+
+        if playbook_stage == "acordo_fechado":
+            stage_block = f"""
+ETAPA ATUAL DO ROTEIRO: {STAGE_LABELS.get(playbook_stage, playbook_stage)}
+- O cliente acaba de aceitar a proposta. O acordo está fechado.
+- Valor acordado: {valor_acordado} (faixa {target_t}, {target_key}).
+- Confirme o acordo informando esse valor e parabenize pela regularização.
+- Informe que o documento para pagamento será gerado e enviado ao contato cadastrado.
+- Não apresente novas propostas, não pergunte forma de pagamento e não invente códigos.
+- Resposta objetiva (máximo ~4 frases); não repita saudação nem resumo do contrato.
+"""
+            template = _NEGOTIATOR_PROMPT_PATH.read_text(encoding="utf-8")
+            return f"{template.format(contexto_credito=contexto_credito)}\n{stage_block}"
 
         if min_t > 1:
             floor_block = (
                 f"- Já foi ofertada a faixa {min_t} ({tier_label(min_t)}). "
                 "NUNCA regredir para faixa inferior (valor total mais alto).\n"
-                f"- Neste turno, use a faixa {target_t} ({target_key}: {limits.get(target_key)}), "
-                "ou mantenha a melhor faixa já apresentada se o cliente não pedir nova condição.\n"
             )
+            if target_t > min_t:
+                floor_block += (
+                    f"- O cliente recusou ou não consegue pagar a faixa {min_t}. "
+                    f"Neste turno, apresente a faixa {target_t} ({target_key}: {limits.get(target_key)}).\n"
+                )
+            else:
+                floor_block += (
+                    f"- Mantenha a faixa {min_t} ({tier_label(min_t)}). "
+                    "Não avance de faixa até o cliente recusar o valor ofertado.\n"
+                )
         else:
             floor_block = (
-                "- Apresente a proposta CONSERVADORA (proposta_1) neste turno, "
-                "salvo se o cliente já tiver recusado.\n"
-                f"- Se houver dificuldade real de pagamento, avance até proposta_{target_t}.\n"
+                "- Este é o primeiro turno de negociação: apresente SOMENTE a proposta "
+                f"CONSERVADORA (proposta_1: {limits.get('proposta_1')}).\n"
+                "- PROIBIDO citar ou ofertar valores das faixas 2 ou 3 neste turno.\n"
             )
+            if target_t > 1:
+                floor_block += (
+                    f"- O cliente sinalizou dificuldade antes da primeira oferta; "
+                    f"você pode avançar até a faixa {target_t} ({target_key}: {limits.get(target_key)}).\n"
+                )
 
         stage_block = f"""
 ETAPA ATUAL DO ROTEIRO: {STAGE_LABELS.get(playbook_stage, playbook_stage)}
 - O cliente já passou pela saudação e pelo detalhamento do contrato.
-{floor_block}- Só avance para faixa superior se o cliente demonstrar dificuldade real de pagamento.
+{floor_block}- Faixa máxima permitida NESTE turno: {target_t} ({tier_label(target_t)}).
+- Só avance uma faixa por turno, e apenas quando o cliente disser que não consegue pagar o valor ofertado.
 - Nunca ultrapasse proposta_3.
 - Resposta objetiva (máximo ~6 frases); não repita saudação nem resumo do contrato.
 - Se o cliente usar linguagem ofensiva, responda com empatia e profissionalismo, sem repetir palavrões.

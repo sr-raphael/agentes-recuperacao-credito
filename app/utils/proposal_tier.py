@@ -15,6 +15,14 @@ _BRL_RE = re.compile(
 _REFUSAL_HINTS = (
     "não posso",
     "nao posso",
+    "não consigo",
+    "nao consigo",
+    "não tenho",
+    "nao tenho",
+    "não dá",
+    "nao da",
+    "impossível",
+    "impossivel",
     "caro",
     "alto",
     "difícil",
@@ -22,6 +30,8 @@ _REFUSAL_HINTS = (
     "sem condições",
     "sem condicoes",
     "recuso",
+    "não aceito",
+    "nao aceito",
     "negociar melhor",
     "desconto maior",
     "abaixo",
@@ -108,6 +118,16 @@ def suggest_next_tier(
     if any(h in folded for h in _REFUSAL_HINTS) and min_tier < max_tier:
         return min(min_tier + 1, max_tier)
     return min_tier
+
+
+def tier_exceeds_allowed(
+    text: str, limits: dict[str, Any], max_allowed_tier: int
+) -> int | None:
+    """Retorna a faixa detectada se ultrapassar max_allowed_tier; caso contrário None."""
+    tier = infer_tier_from_text(text, limits)
+    if tier is not None and tier > max(1, max_allowed_tier):
+        return tier
+    return None
 
 
 def extract_proposal_metadata(

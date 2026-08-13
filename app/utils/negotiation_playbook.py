@@ -15,16 +15,14 @@ NegotiationStage = Literal[
     "saudacao",
     "detalhamento",
     "negociacao",
-    "escolha_pagamento",
-    "pagamento_gerado",
+    "acordo_fechado",
 ]
 
 STAGE_LABELS = {
     "saudacao": "1 — Saudação e aviso de dívida",
     "detalhamento": "2 — Detalhamento do contrato",
     "negociacao": "3 — Negociação de propostas",
-    "escolha_pagamento": "4 — Escolha da forma de pagamento",
-    "pagamento_gerado": "5 — Pagamento mock gerado",
+    "acordo_fechado": "4 — Acordo fechado",
 }
 
 _NEXT_STAGE: dict[str, NegotiationStage] = {
@@ -49,15 +47,12 @@ def resolve_playbook_stage(
     """
     history = chat_history or []
 
-    if last_etapa == "pagamento_gerado":
-        return "pagamento_gerado"
-
-    if last_etapa == "escolha_pagamento":
-        return "escolha_pagamento"
+    if last_etapa == "acordo_fechado":
+        return "acordo_fechado"
 
     if last_etapa == "negociacao":
         if detect_deal_acceptance(user_message):
-            return "escolha_pagamento"
+            return "acordo_fechado"
         return "negociacao"
 
     if detect_intent(user_message, history) == "negociacao":
@@ -73,7 +68,7 @@ def resolve_playbook_stage(
 
 
 def requires_compliance_audit_for_stage(stage: NegotiationStage) -> bool:
-    return stage == "negociacao"
+    return stage in ("negociacao", "acordo_fechado")
 
 
 def format_brl(value: float | int) -> str:
@@ -84,8 +79,6 @@ def format_brl(value: float | int) -> str:
 def build_scripted_message(
     stage: NegotiationStage,
     credit_context: dict,
-    *,
-    agreed_valor: float | None = None,
 ) -> str:
     contract = credit_context.get("contract_data") or {}
     nome = contract.get("nome", "Cliente")
@@ -117,39 +110,11 @@ def build_scripted_message(
             "Deseja que eu apresente opções para regularizar essa dívida?"
         )
 
-    if stage == "escolha_pagamento":
-        valor_linha = ""
-        if agreed_valor is not None and agreed_valor > 0:
-            valor_linha = f"Valor acordado: {format_brl(agreed_valor)}\n\n"
+    if stage == "acordo_fechado":
         return (
-            f"Perfeito, {nome}! Registramos seu acordo nesta simulação.\n\n"
-            f"{valor_linha}"
-            "Para concluir, como prefere pagar?\n"
-            "• Digite PIX para receber o código copia e cola\n"
-            "• Digite BOLETO para receber a linha digitável\n\n"
-            "Os dados gerados são fictícios e não possuem valor legal."
-        )
-
-    if stage == "pagamento_gerado":
-        return (
-            f"{nome}, seu acordo já foi registrado e o comprovante simulado foi enviado "
-            "nesta conversa. Se precisar rever as opções de negociação, inicie uma nova sessão."
+            f"{nome}, seu acordo já foi registrado nesta simulação. "
+            "O documento para pagamento será enviado ao seu contato cadastrado. "
+            "Se precisar rever as opções de negociação, inicie uma nova sessão."
         )
 
     raise ValueError(f"Etapa sem script determinístico: {stage}")
-
-
-def build_payment_method_retry_message(
-    credit_context: dict,
-    *,
-    agreed_valor: float | None = None,
-) -> str:
-    nome = (credit_context.get("contract_data") or {}).get("nome", "Cliente")
-    valor_linha = ""
-    if agreed_valor is not None and agreed_valor > 0:
-        valor_linha = f"Valor acordado: {format_brl(agreed_valor)}. "
-    return (
-        f"{nome}, não identifiquei a forma de pagamento. "
-        f"{valor_linha}"
-        "Responda PIX ou BOLETO para gerarmos o comprovante simulado."
-    )

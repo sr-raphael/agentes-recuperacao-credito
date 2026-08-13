@@ -227,8 +227,7 @@ def load_funnel_df(df: pd.DataFrame | None = None, **kwargs) -> pd.DataFrame:
         "saudacao",
         "detalhamento",
         "negociacao",
-        "escolha_pagamento",
-        "pagamento_gerado",
+        "acordo_fechado",
         "bloqueado_entrada",
     ]
     por_sessao = df.groupby("session_id")["etapa"].apply(set)

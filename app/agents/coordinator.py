@@ -10,15 +10,12 @@ from app.agents.credit_analyst import CreditAnalystAgent
 from app.agents.negotiator import NegotiatorAgent
 from app.database.negotiation_history import NegotiationHistoryStore
 from app.utils.llm_metrics import add_agent_metrics, empty_turn_metrics, finalize_turn_metrics
-from app.utils.conversation import detect_payment_method
 from app.utils.negotiation_playbook import (
     NegotiationStage,
-    build_payment_method_retry_message,
     build_scripted_message,
     requires_compliance_audit_for_stage,
     resolve_playbook_stage,
 )
-from app.utils.payment_mock import build_payment_confirmation
 from app.utils.input_guardrails import (
     auditoria_status_for_block,
     mask_for_storage,
@@ -28,8 +25,8 @@ from app.utils.input_guardrails import (
 from app.utils.proposal_tier import (
     extract_proposal_metadata,
     max_tier_from_history,
-    resolve_agreed_offer,
     suggest_next_tier,
+    tier_exceeds_allowed,
 )
 
 logger = logging.getLogger(__name__)
@@ -129,11 +126,32 @@ class CoordinatorAgent:
             return "etapa_saudacao"
         if stage == "detalhamento":
             return "etapa_detalhamento"
-        if stage == "escolha_pagamento":
-            return "aguardando_forma_pagamento"
-        if stage == "pagamento_gerado":
+        if stage == "acordo_fechado":
             return "acordo_concluido"
         return llm_status
+
+    @staticmethod
+    def _tier_guard_verdict(
+        proposta: str, limits: dict, target_tier: int
+    ) -> dict[str, Any] | None:
+        """Rejeita propostas que antecipam faixas superiores à permitida no turno."""
+        excess = tier_exceeds_allowed(proposta, limits, target_tier)
+        if excess is None:
+            return None
+        target_key = f"proposta_{target_tier}"
+        return {
+            "aprovado": False,
+            "motivo_rejeicao": (
+                f"A proposta citou faixa {excess}, mas neste turno só é permitido "
+                f"até a faixa {target_tier}. O desconto deve ser gradativo: "
+                "só avance quando o cliente recusar o valor ofertado."
+            ),
+            "risco_detectado": "medio",
+            "correcao_sugerida": (
+                f"Reformule usando somente a faixa {target_tier} "
+                f"(valor {limits.get(target_key)}), sem antecipar descontos maiores."
+            ),
+        }
 
     def _run_audited_negotiation(
         self,
@@ -148,6 +166,7 @@ class CoordinatorAgent:
         min_offer_tier: int,
         target_tier: int,
         turn_started_at: float,
+        acordo_fechado: bool = False,
     ) -> dict[str, str | dict | float | int | bool]:
         proposta, negociador_metrics = self.negotiator.generate_response(
             user_input,
@@ -161,10 +180,12 @@ class CoordinatorAgent:
         turn_metrics = empty_turn_metrics()
         add_agent_metrics(turn_metrics, negociador_metrics)
 
-        veredito, auditor_metrics = self.auditor.audit_proposal(
-            proposta, contexto_financeiro
-        )
-        add_agent_metrics(turn_metrics, auditor_metrics)
+        veredito = self._tier_guard_verdict(proposta, limits, target_tier)
+        if veredito is None:
+            veredito, auditor_metrics = self.auditor.audit_proposal(
+                proposta, contexto_financeiro
+            )
+            add_agent_metrics(turn_metrics, auditor_metrics)
 
         retries_left = MAX_NEGOTIATOR_RETRIES
         while (
@@ -186,10 +207,12 @@ class CoordinatorAgent:
                 },
             )
             add_agent_metrics(turn_metrics, negociador_metrics)
-            veredito, auditor_metrics = self.auditor.audit_proposal(
-                proposta, contexto_financeiro
-            )
-            add_agent_metrics(turn_metrics, auditor_metrics)
+            veredito = self._tier_guard_verdict(proposta, limits, target_tier)
+            if veredito is None:
+                veredito, auditor_metrics = self.auditor.audit_proposal(
+                    proposta, contexto_financeiro
+                )
+                add_agent_metrics(turn_metrics, auditor_metrics)
             retries_left -= 1
 
         if veredito.get("aprovado"):
@@ -204,6 +227,7 @@ class CoordinatorAgent:
                 stage,
                 turn_metrics,
                 turn_started_at=turn_started_at,
+                acordo_fechado=acordo_fechado,
                 faixa_proposta=faixa,
                 valor_citado=valor,
                 auditoria_json=veredito,
@@ -211,7 +235,9 @@ class CoordinatorAgent:
 
         _log_audit_rejection(proposta, veredito, "fallback")
         fallback = self.negotiator.generate_safe_fallback(
-            contexto_financeiro, min_offer_tier=min_offer_tier
+            contexto_financeiro,
+            min_offer_tier=min_offer_tier,
+            closing=acordo_fechado,
         )
         faixa, valor = extract_proposal_metadata(fallback, limits)
         return self._finish_turn(
@@ -224,6 +250,7 @@ class CoordinatorAgent:
             stage,
             turn_metrics,
             turn_started_at=turn_started_at,
+            acordo_fechado=acordo_fechado,
             faixa_proposta=faixa,
             valor_citado=valor,
             auditoria_json=veredito,
@@ -306,69 +333,35 @@ class CoordinatorAgent:
                 turn_started_at=turn_started_at,
             )
 
-        if stage == "pagamento_gerado":
-            texto = build_scripted_message("pagamento_gerado", contexto_financeiro)
-            return self._finish_turn(
-                client_cpf,
-                session_id,
-                history,
-                user_input,
-                texto,
-                self._audit_status_for_stage(stage, ""),
-                stage,
-                turn_started_at=turn_started_at,
-                acordo_fechado=True,
-            )
-
-        if stage == "escolha_pagamento":
-            limits = contexto_financeiro.get("proposal_limits") or {}
-            faixa_acordo, valor_acordo = resolve_agreed_offer(history, limits)
-            method = detect_payment_method(user_input)
-            if method:
-                texto = build_payment_confirmation(
-                    method,
-                    contexto_financeiro,
-                    cpf=client_cpf,
-                    session_id=session_id,
-                    agreed_tier=faixa_acordo,
-                    agreed_valor=valor_acordo,
-                )
+        if stage == "acordo_fechado":
+            if last_etapa == "acordo_fechado":
+                texto = build_scripted_message("acordo_fechado", contexto_financeiro)
                 return self._finish_turn(
                     client_cpf,
                     session_id,
                     history,
                     user_input,
                     texto,
-                    "pagamento_mock_gerado",
-                    "pagamento_gerado",
+                    self._audit_status_for_stage(stage, ""),
+                    stage,
                     turn_started_at=turn_started_at,
                     acordo_fechado=True,
-                    faixa_proposta=faixa_acordo,
-                    valor_citado=valor_acordo or None,
                 )
 
-            if last_etapa == "escolha_pagamento":
-                texto = build_payment_method_retry_message(
-                    contexto_financeiro,
-                    agreed_valor=valor_acordo,
-                )
-            else:
-                texto = build_scripted_message(
-                    "escolha_pagamento",
-                    contexto_financeiro,
-                    agreed_valor=valor_acordo,
-                )
-            return self._finish_turn(
-                client_cpf,
-                session_id,
-                history,
-                user_input,
-                texto,
-                self._audit_status_for_stage(stage, ""),
-                stage,
+            limits = contexto_financeiro.get("proposal_limits") or {}
+            faixa_acordo = max_tier_from_history(history, limits)
+            return self._run_audited_negotiation(
+                client_cpf=client_cpf,
+                session_id=session_id,
+                history=history,
+                user_input=user_input,
+                contexto_financeiro=contexto_financeiro,
+                stage=stage,
+                limits=limits,
+                min_offer_tier=faixa_acordo,
+                target_tier=faixa_acordo,
                 turn_started_at=turn_started_at,
-                faixa_proposta=faixa_acordo,
-                valor_citado=valor_acordo or None,
+                acordo_fechado=True,
             )
 
         limits = contexto_financeiro.get("proposal_limits") or {}
