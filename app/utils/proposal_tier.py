@@ -12,33 +12,6 @@ _BRL_RE = re.compile(
     re.IGNORECASE,
 )
 
-_REFUSAL_HINTS = (
-    "não posso",
-    "nao posso",
-    "não consigo",
-    "nao consigo",
-    "não tenho",
-    "nao tenho",
-    "não dá",
-    "nao da",
-    "impossível",
-    "impossivel",
-    "caro",
-    "alto",
-    "difícil",
-    "dificil",
-    "sem condições",
-    "sem condicoes",
-    "recuso",
-    "não aceito",
-    "nao aceito",
-    "negociar melhor",
-    "desconto maior",
-    "abaixo",
-    "menos",
-)
-
-
 def _parse_brl(raw: str) -> float | None:
     s = (raw or "").strip()
     if not s:
@@ -74,7 +47,8 @@ def infer_tier_from_amount(amount: float, limits: dict[str, Any]) -> int | None:
         return None
 
     amount_f = float(amount)
-    best_tier, best_diff = tiers[0]
+    best_tier, best_val = tiers[0]
+    best_diff = abs(best_val - amount_f)
     for tier, val in tiers[1:]:
         diff = abs(val - amount_f)
         if diff < best_diff:
@@ -93,31 +67,56 @@ def infer_tier_from_text(text: str, limits: dict[str, Any]) -> int | None:
     return max(tiers) if tiers else None
 
 
+def _total_debt(limits: dict[str, Any]) -> float:
+    return float(limits.get("principal") or 0) + float(limits.get("juros") or 0)
+
+
+def _is_debt_anchor(value: float, limits: dict[str, Any]) -> bool:
+    total = _total_debt(limits)
+    return total > 0 and abs(value - total) < 1.0
+
+
+def offered_tier_from_history(
+    history: list[dict[str, str]] | None, limits: dict[str, Any]
+) -> int:
+    """
+    Maior faixa já ofertada pelo assistente na negociação.
+    Retorna 0 se nenhuma proposta foi apresentada ainda.
+    """
+    best = 0
+    for msg in history or []:
+        if str(msg.get("role", "")).lower() != "assistant":
+            continue
+        for value in extract_brl_values(str(msg.get("content") or "")):
+            if _is_debt_anchor(value, limits):
+                continue
+            tier = infer_tier_from_amount(value, limits)
+            if tier is not None:
+                best = max(best, tier)
+    return best
+
+
 def max_tier_from_history(
     history: list[dict[str, str]] | None, limits: dict[str, Any]
 ) -> int:
     """Maior faixa já citada pelo assistente (1–3). Default: 1."""
-    best = 1
-    for msg in history or []:
-        if str(msg.get("role", "")).lower() != "assistant":
-            continue
-        tier = infer_tier_from_text(str(msg.get("content") or ""), limits)
-        if tier is not None:
-            best = max(best, tier)
-    return best
+    offered = offered_tier_from_history(history, limits)
+    return offered if offered > 0 else 1
 
 
 def suggest_next_tier(
-    min_tier: int,
+    offered_tier: int,
     user_message: str,
     *,
     max_tier: int = 3,
 ) -> int:
-    """Sugere faixa do turno: mantém a mínima ou sobe 1 se houver sinal de dificuldade."""
-    folded = (user_message or "").lower()
-    if any(h in folded for h in _REFUSAL_HINTS) and min_tier < max_tier:
-        return min(min_tier + 1, max_tier)
-    return min_tier
+    """Sobe uma faixa somente após recusa explícita; caso contrário mantém a atual."""
+    from app.utils.conversation import detect_proposal_refusal
+
+    current = max(1, min(3, offered_tier)) if offered_tier > 0 else 1
+    if detect_proposal_refusal(user_message) and current < max_tier:
+        return min(current + 1, max_tier)
+    return current if offered_tier > 0 else 1
 
 
 def tier_exceeds_allowed(

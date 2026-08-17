@@ -124,6 +124,51 @@ def detect_deal_acceptance(user_message: str) -> bool:
     return any(k in folded for k in _DEAL_ACCEPTANCE_KEYWORDS)
 
 
+_PROPOSAL_REFUSAL_KEYWORDS = (
+    "não posso",
+    "nao posso",
+    "não consigo",
+    "nao consigo",
+    "não tenho",
+    "nao tenho",
+    "não dá",
+    "nao da",
+    "não quero",
+    "nao quero",
+    "impossível",
+    "impossivel",
+    "caro",
+    "alto demais",
+    "muito alto",
+    "difícil",
+    "dificil",
+    "sem condições",
+    "sem condicoes",
+    "recuso",
+    "não aceito",
+    "nao aceito",
+    "não topo",
+    "nao topo",
+    "negociar melhor",
+    "desconto maior",
+    "melhor condição",
+    "melhor condicao",
+    "abaixo disso",
+    "menos que",
+    "não pago",
+    "nao pago",
+    "fora do meu alcance",
+)
+
+
+def detect_proposal_refusal(user_message: str) -> bool:
+    """True quando o cliente recusa ou sinaliza que não consegue pagar o valor ofertado."""
+    folded = _fold(user_message)
+    if not folded:
+        return False
+    return any(k in folded for k in _PROPOSAL_REFUSAL_KEYWORDS)
+
+
 def requires_compliance_audit(intent: ConversationIntent) -> bool:
     """Auditor só quando há risco de valores/descontos na resposta."""
     return intent in ("negociacao", "continuacao")

@@ -22,9 +22,11 @@ from app.utils.input_guardrails import (
     validate_chat_history,
     validate_debt_request,
 )
+from app.utils.conversation import detect_proposal_refusal
 from app.utils.proposal_tier import (
     extract_proposal_metadata,
     max_tier_from_history,
+    offered_tier_from_history,
     suggest_next_tier,
     tier_exceeds_allowed,
 )
@@ -167,6 +169,7 @@ class CoordinatorAgent:
         target_tier: int,
         turn_started_at: float,
         acordo_fechado: bool = False,
+        insist_current_offer: bool = False,
     ) -> dict[str, str | dict | float | int | bool]:
         proposta, negociador_metrics = self.negotiator.generate_response(
             user_input,
@@ -175,6 +178,7 @@ class CoordinatorAgent:
             playbook_stage=stage,
             min_offer_tier=min_offer_tier,
             target_tier=target_tier,
+            insist_current_offer=insist_current_offer,
         )
         logger.info("Proposta inicial do negociador: %s", proposta)
         turn_metrics = empty_turn_metrics()
@@ -201,6 +205,7 @@ class CoordinatorAgent:
                 playbook_stage=stage,
                 min_offer_tier=min_offer_tier,
                 target_tier=target_tier,
+                insist_current_offer=insist_current_offer,
                 revision_context={
                     "rejected_response": proposta,
                     "audit_verdict": veredito,
@@ -238,6 +243,7 @@ class CoordinatorAgent:
             contexto_financeiro,
             min_offer_tier=min_offer_tier,
             closing=acordo_fechado,
+            insist=insist_current_offer,
         )
         faixa, valor = extract_proposal_metadata(fallback, limits)
         return self._finish_turn(
@@ -365,8 +371,14 @@ class CoordinatorAgent:
             )
 
         limits = contexto_financeiro.get("proposal_limits") or {}
-        min_offer_tier = max_tier_from_history(history, limits)
-        target_tier = suggest_next_tier(min_offer_tier, user_input)
+        offered_tier = offered_tier_from_history(history, limits)
+        target_tier = suggest_next_tier(offered_tier, user_input)
+        min_offer_tier = offered_tier if offered_tier > 0 else 1
+        insist_current_offer = (
+            offered_tier > 0
+            and target_tier == offered_tier
+            and not detect_proposal_refusal(user_input)
+        )
 
         if requires_compliance_audit_for_stage(stage):
             return self._run_audited_negotiation(
@@ -380,6 +392,7 @@ class CoordinatorAgent:
                 min_offer_tier=min_offer_tier,
                 target_tier=target_tier,
                 turn_started_at=turn_started_at,
+                insist_current_offer=insist_current_offer,
             )
 
         proposta_bruta, negociador_metrics = self.negotiator.generate_response(
@@ -389,6 +402,7 @@ class CoordinatorAgent:
             playbook_stage=stage,
             min_offer_tier=min_offer_tier,
             target_tier=target_tier,
+            insist_current_offer=insist_current_offer,
         )
         turn_metrics = empty_turn_metrics()
         add_agent_metrics(turn_metrics, negociador_metrics)
