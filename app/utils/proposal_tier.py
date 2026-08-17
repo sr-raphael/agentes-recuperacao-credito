@@ -154,22 +154,6 @@ def proposta_value(limits: dict[str, Any], tier: int) -> float:
     return float(limits.get(key) or 0)
 
 
-def resolve_agreed_offer(
-    history: list[dict[str, str]] | None,
-    limits: dict[str, Any],
-) -> tuple[int, float]:
-    """
-    Faixa e valor do acordo com base na maior proposta já citada pelo assistente.
-    Fallback: faixa 1 (proposta conservadora).
-    """
-    tier = max_tier_from_history(history, limits)
-    valor = proposta_value(limits, tier)
-    if valor <= 0:
-        tier = 1
-        valor = proposta_value(limits, tier)
-    return tier, round(valor, 2)
-
-
 def tier_label(tier: int) -> str:
     return {
         1: "conservadora",

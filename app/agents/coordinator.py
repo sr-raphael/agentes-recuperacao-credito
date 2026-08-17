@@ -242,6 +242,7 @@ class CoordinatorAgent:
         fallback = self.negotiator.generate_safe_fallback(
             contexto_financeiro,
             min_offer_tier=min_offer_tier,
+            target_tier=target_tier,
             closing=acordo_fechado,
             insist=insist_current_offer,
         )

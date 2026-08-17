@@ -8,7 +8,7 @@ import re
 import unicodedata
 from typing import Any, Literal
 
-ConversationIntent = Literal["saudacao", "negociacao", "continuacao", "aceite_acordo"]
+ConversationIntent = Literal["saudacao", "negociacao", "continuacao"]
 
 _DEAL_ACCEPTANCE_KEYWORDS = (
     "aceito",
@@ -27,15 +27,13 @@ _DEAL_ACCEPTANCE_KEYWORDS = (
     "confirmo",
     "confirmado",
     "topo",
-    "tô dentro",
     "to dentro",
     "vamos fechar",
     "quero fechar",
 )
 
-
 _GREETING_ONLY_RE = re.compile(
-    r"^\s*(oi|olá|ola|hey|e\s*aí|eai|bom\s+dia|boa\s+tarde|boa\s+noite|"
+    r"^\s*(oi|ola|hey|e\s*ai|eai|bom\s+dia|boa\s+tarde|boa\s+noite|"
     r"tudo\s+bem|como\s+vai|blz|beleza|opa)\s*[!?.…]*\s*$",
     re.IGNORECASE,
 )
@@ -43,13 +41,11 @@ _GREETING_ONLY_RE = re.compile(
 _NEGOTIATION_KEYWORDS = (
     "pagar",
     "pagamento",
-    "dívida",
     "divida",
     "desconto",
     "parcela",
     "parcelas",
     "negociar",
-    "negociação",
     "negociacao",
     "acordo",
     "valor",
@@ -63,10 +59,59 @@ _NEGOTIATION_KEYWORDS = (
     "saldo",
 )
 
+_PROPOSAL_REFUSAL_KEYWORDS = (
+    "nao posso",
+    "nao consigo",
+    "nao tenho",
+    "nao da",
+    "nao quero",
+    "impossivel",
+    "caro",
+    "ta caro",
+    "esta caro",
+    "alto demais",
+    "muito alto",
+    "dificil",
+    "dificuldades",
+    "sem condicoes",
+    "sem dinheiro",
+    "sem grana",
+    "desempregado",
+    "perdi o emprego",
+    "sem emprego",
+    "sem renda",
+    "recuso",
+    "nao aceito",
+    "nao topo",
+    "negociar melhor",
+    "desconto maior",
+    "melhor condicao",
+    "pode melhorar",
+    "melhorar",
+    "abaixo disso",
+    "menos que",
+    "nao pago",
+    "fora do meu alcance",
+)
+
 
 def _fold(text: str) -> str:
     s = unicodedata.normalize("NFKC", text or "").lower().strip()
     return re.sub(r"\s+", " ", s)
+
+
+def _normalize(text: str) -> str:
+    """Lowercase, colapsa espaços e remove acentos para matching de keywords."""
+    folded = _fold(text)
+    decomposed = unicodedata.normalize("NFD", folded)
+    return "".join(c for c in decomposed if unicodedata.category(c) != "Mn")
+
+
+def _contains_any(text: str, keywords: tuple[str, ...]) -> bool:
+    normalized = _normalize(text)
+    if not normalized:
+        return False
+    return any(k in normalized for k in keywords)
 
 
 def history_has_negotiation_topic(history: list[Any] | None) -> bool:
@@ -80,8 +125,7 @@ def history_has_negotiation_topic(history: list[Any] | None) -> bool:
             content = str(getattr(msg, "content", "") or "")
         if detect_intent(content, []) == "negociacao":
             return True
-        folded = _fold(content)
-        if any(k in folded for k in _NEGOTIATION_KEYWORDS):
+        if _contains_any(content, _NEGOTIATION_KEYWORDS):
             return True
     return False
 
@@ -97,14 +141,14 @@ def detect_intent(
     - negociacao: pedido explícito sobre dívida/pagamento
     - continuacao: mensagem ambígua, mas já há conversa em andamento
     """
-    folded = _fold(user_message)
-    if not folded:
+    normalized = _normalize(user_message)
+    if not normalized:
         return "continuacao"
 
-    if any(k in folded for k in _NEGOTIATION_KEYWORDS):
+    if _contains_any(user_message, _NEGOTIATION_KEYWORDS):
         return "negociacao"
 
-    if _GREETING_ONLY_RE.match(folded) and not history_has_negotiation_topic(chat_history):
+    if _GREETING_ONLY_RE.match(normalized) and not history_has_negotiation_topic(chat_history):
         return "saudacao"
 
     if history_has_negotiation_topic(chat_history):
@@ -118,57 +162,9 @@ def detect_intent(
 
 
 def detect_deal_acceptance(user_message: str) -> bool:
-    folded = _fold(user_message)
-    if not folded:
-        return False
-    return any(k in folded for k in _DEAL_ACCEPTANCE_KEYWORDS)
-
-
-_PROPOSAL_REFUSAL_KEYWORDS = (
-    "não posso",
-    "nao posso",
-    "não consigo",
-    "nao consigo",
-    "não tenho",
-    "nao tenho",
-    "não dá",
-    "nao da",
-    "não quero",
-    "nao quero",
-    "impossível",
-    "impossivel",
-    "caro",
-    "alto demais",
-    "muito alto",
-    "difícil",
-    "dificil",
-    "sem condições",
-    "sem condicoes",
-    "recuso",
-    "não aceito",
-    "nao aceito",
-    "não topo",
-    "nao topo",
-    "negociar melhor",
-    "desconto maior",
-    "melhor condição",
-    "melhor condicao",
-    "abaixo disso",
-    "menos que",
-    "não pago",
-    "nao pago",
-    "fora do meu alcance",
-)
+    return _contains_any(user_message, _DEAL_ACCEPTANCE_KEYWORDS)
 
 
 def detect_proposal_refusal(user_message: str) -> bool:
     """True quando o cliente recusa ou sinaliza que não consegue pagar o valor ofertado."""
-    folded = _fold(user_message)
-    if not folded:
-        return False
-    return any(k in folded for k in _PROPOSAL_REFUSAL_KEYWORDS)
-
-
-def requires_compliance_audit(intent: ConversationIntent) -> bool:
-    """Auditor só quando há risco de valores/descontos na resposta."""
-    return intent in ("negociacao", "continuacao")
+    return _contains_any(user_message, _PROPOSAL_REFUSAL_KEYWORDS)

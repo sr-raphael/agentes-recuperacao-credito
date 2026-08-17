@@ -122,28 +122,39 @@ class NegotiatorAgent:
         context,
         *,
         min_offer_tier: int = 1,
+        target_tier: int = 1,
         closing: bool = False,
         insist: bool = False,
     ):
-        """Resposta determinística quando o auditor bloqueia — mantém a melhor faixa já ofertada."""
+        """Resposta determinística quando o auditor bloqueia."""
         try:
             limits = context.get("proposal_limits") or context
-            tier = max(1, min(3, min_offer_tier))
-            valor = proposta_value(limits, tier)
+            nome = (context.get("contract_data") or {}).get("nome", "Cliente")
+            min_t = max(1, min(3, min_offer_tier))
+            target_t = max(min_t, min(3, target_tier))
             if closing:
+                valor = proposta_value(limits, min_t)
                 return (
                     f"Perfeito, acordo fechado no valor de {format_brl(valor)} para pagamento à vista. "
                     "Parabéns por regularizar sua situação financeira conosco hoje. "
                     "O documento para pagamento será gerado e enviado para o seu contato cadastrado."
                 )
             if insist:
-                nome = (context.get("contract_data") or {}).get("nome", "Cliente")
+                valor = proposta_value(limits, min_t)
                 return (
                     f"{nome}, reforço a proposta vigente de **{format_brl(valor)}** para quitação à vista. "
                     "Esse é o valor que temos disponível neste momento. "
                     "Caso faça sentido para você, posso registrar o acordo; "
                     "se não couber no seu orçamento, me avise para avaliarmos juntos."
                 )
+            if target_t > min_t:
+                valor = proposta_value(limits, target_t)
+                return (
+                    f"{nome}, entendo sua situação. Busquei uma nova condição e consegui liberar "
+                    f"**{format_brl(valor)}** para quitação à vista. "
+                    "Esse é o melhor valor disponível nesta faixa. Podemos fechar o acordo?"
+                )
+            valor = proposta_value(limits, min_t)
             return (
                 "Entendo. Para seguir com segurança neste canal, mantenho a melhor condição "
                 f"já apresentada (total aproximado {format_brl(valor)}). "
@@ -225,12 +236,15 @@ ETAPA ATUAL DO ROTEIRO: {STAGE_LABELS.get(playbook_stage, playbook_stage)}
                 "- PROIBIDO apresentar faixa superior ou valor menor que a proposta vigente.\n"
             )
         elif target_t > min_t:
+            valor_novo = format_brl(proposta_value(limits, target_t))
             floor_block = (
                 f"- Já foi ofertada a faixa {min_t} ({tier_label(min_t)}). "
                 "NUNCA regredir para faixa inferior (valor total mais alto).\n"
-                f"- O cliente recusou explicitamente a faixa {min_t}. "
+                f"- O cliente recusou ou sinalizou dificuldade com a faixa {min_t}. "
                 f"Neste turno, apresente SOMENTE a faixa {target_t} "
-                f"({target_key}: {limits.get(target_key)}).\n"
+                f"({target_key}: {limits.get(target_key)}, valor **{valor_novo}**).\n"
+                "- Reconheça a situação do cliente em no máximo 1 frase; em seguida oferte o novo valor.\n"
+                "- PROIBIDO escalar para humano, inventar valores fora das faixas ou ficar só investigando.\n"
             )
         else:
             floor_block = (
