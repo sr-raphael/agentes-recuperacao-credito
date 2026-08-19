@@ -24,6 +24,7 @@ from app.utils.input_guardrails import (
 )
 from app.utils.conversation import detect_proposal_refusal
 from app.utils.proposal_tier import (
+    build_tier_audit_context,
     extract_proposal_metadata,
     max_tier_from_history,
     offered_tier_from_history,
@@ -133,6 +134,107 @@ class CoordinatorAgent:
         return llm_status
 
     @staticmethod
+    def _progressive_tier_approved(
+        proposta: str,
+        limits: dict,
+        offered_tier: int,
+        target_tier: int,
+        user_input: str,
+        *,
+        closing: bool = False,
+    ) -> bool:
+        """Aprovação determinística quando a faixa respeita o roteiro de concessão."""
+        tier, _ = extract_proposal_metadata(proposta, limits)
+        if tier is None or tier != target_tier:
+            return False
+        if closing:
+            return True
+        if target_tier > offered_tier:
+            return detect_proposal_refusal(user_input)
+        return True
+
+    @staticmethod
+    def _override_progressive_tier_rejection(
+        veredito: dict[str, Any],
+        proposta: str,
+        limits: dict,
+        offered_tier: int,
+        target_tier: int,
+        user_input: str,
+        *,
+        closing: bool = False,
+    ) -> dict[str, Any]:
+        if veredito.get("aprovado"):
+            return veredito
+        if not CoordinatorAgent._progressive_tier_approved(
+            proposta,
+            limits,
+            offered_tier,
+            target_tier,
+            user_input,
+            closing=closing,
+        ):
+            return veredito
+        motivo = str(veredito.get("motivo_rejeicao") or "").lower()
+        progressive_markers = (
+            "concess",
+            "progressiv",
+            "proposta_1",
+            "proposta_2",
+            "proposta_3",
+            "faixa",
+            "recusa",
+            "pulou",
+        )
+        if not any(marker in motivo for marker in progressive_markers):
+            return veredito
+        return {
+            **veredito,
+            "aprovado": True,
+            "motivo_rejeicao": None,
+            "risco_detectado": veredito.get("risco_detectado") or "baixo",
+            "correcao_sugerida": None,
+            "override_progressivo": True,
+        }
+
+    def _audit_negotiator_proposal(
+        self,
+        proposta: str,
+        contexto_financeiro: dict,
+        *,
+        history: list[dict[str, str]],
+        limits: dict,
+        offered_tier: int,
+        target_tier: int,
+        user_input: str,
+        closing: bool = False,
+    ) -> tuple[dict[str, Any], dict | None]:
+        client_refused = detect_proposal_refusal(user_input)
+        negotiation_context = build_tier_audit_context(
+            history=history,
+            limits=limits,
+            offered_tier=offered_tier,
+            target_tier=target_tier,
+            user_input=user_input,
+            client_refused=client_refused,
+        )
+        veredito, auditor_metrics = self.auditor.audit_proposal(
+            proposta,
+            contexto_financeiro,
+            negotiation_context,
+        )
+        veredito = self._override_progressive_tier_rejection(
+            veredito,
+            proposta,
+            limits,
+            offered_tier,
+            target_tier,
+            user_input,
+            closing=closing,
+        )
+        return veredito, auditor_metrics
+
+    @staticmethod
     def _tier_guard_verdict(
         proposta: str, limits: dict, target_tier: int
     ) -> dict[str, Any] | None:
@@ -165,6 +267,7 @@ class CoordinatorAgent:
         contexto_financeiro: dict,
         stage: NegotiationStage,
         limits: dict,
+        start_offered_tier: int,
         min_offer_tier: int,
         target_tier: int,
         turn_started_at: float,
@@ -186,8 +289,15 @@ class CoordinatorAgent:
 
         veredito = self._tier_guard_verdict(proposta, limits, target_tier)
         if veredito is None:
-            veredito, auditor_metrics = self.auditor.audit_proposal(
-                proposta, contexto_financeiro
+            veredito, auditor_metrics = self._audit_negotiator_proposal(
+                proposta,
+                contexto_financeiro,
+                history=history,
+                limits=limits,
+                offered_tier=start_offered_tier,
+                target_tier=target_tier,
+                user_input=user_input,
+                closing=acordo_fechado,
             )
             add_agent_metrics(turn_metrics, auditor_metrics)
 
@@ -214,8 +324,15 @@ class CoordinatorAgent:
             add_agent_metrics(turn_metrics, negociador_metrics)
             veredito = self._tier_guard_verdict(proposta, limits, target_tier)
             if veredito is None:
-                veredito, auditor_metrics = self.auditor.audit_proposal(
-                    proposta, contexto_financeiro
+                veredito, auditor_metrics = self._audit_negotiator_proposal(
+                    proposta,
+                    contexto_financeiro,
+                    history=history,
+                    limits=limits,
+                    offered_tier=start_offered_tier,
+                    target_tier=target_tier,
+                    user_input=user_input,
+                    closing=acordo_fechado,
                 )
                 add_agent_metrics(turn_metrics, auditor_metrics)
             retries_left -= 1
@@ -357,6 +474,7 @@ class CoordinatorAgent:
 
             limits = contexto_financeiro.get("proposal_limits") or {}
             faixa_acordo = max_tier_from_history(history, limits)
+            offered_before_close = offered_tier_from_history(history, limits)
             return self._run_audited_negotiation(
                 client_cpf=client_cpf,
                 session_id=session_id,
@@ -365,6 +483,7 @@ class CoordinatorAgent:
                 contexto_financeiro=contexto_financeiro,
                 stage=stage,
                 limits=limits,
+                start_offered_tier=offered_before_close,
                 min_offer_tier=faixa_acordo,
                 target_tier=faixa_acordo,
                 turn_started_at=turn_started_at,
@@ -390,6 +509,7 @@ class CoordinatorAgent:
                 contexto_financeiro=contexto_financeiro,
                 stage=stage,
                 limits=limits,
+                start_offered_tier=offered_tier,
                 min_offer_tier=min_offer_tier,
                 target_tier=target_tier,
                 turn_started_at=turn_started_at,

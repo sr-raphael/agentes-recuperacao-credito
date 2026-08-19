@@ -28,11 +28,18 @@ class AuditorAgent:
             google_api_key=os.getenv("API_KEY"),
         )
 
-    def audit_proposal(self, negotiator_response, credit_limits):
+    def audit_proposal(
+        self,
+        negotiator_response,
+        credit_limits,
+        negotiation_context: dict | None = None,
+    ):
         """
         Revisa a proposta antes de enviar ao cliente.
         """
-        prompt = self._build_audit_prompt(negotiator_response, credit_limits)
+        prompt = self._build_audit_prompt(
+            negotiator_response, credit_limits, negotiation_context
+        )
         if not (prompt and prompt.strip()):
             return {
                 "aprovado": False,
@@ -67,7 +74,12 @@ class AuditorAgent:
     def is_parse_failure(veredito: dict) -> bool:
         return veredito.get("motivo_rejeicao") == _AUDITOR_PARSE_ERROR
 
-    def _build_audit_prompt(self, response, limits: dict) -> str:
+    def _build_audit_prompt(
+        self,
+        response,
+        limits: dict,
+        negotiation_context: dict | None = None,
+    ) -> str:
         limits_view = {
             "proposal_limits": limits.get("proposal_limits") or {},
             "policy_data": limits.get("policy_data") or {},
@@ -75,5 +87,10 @@ class AuditorAgent:
         template = _AUDITOR_PROMPT_PATH.read_text(encoding="utf-8")
         return template.format(
             limites_tool=json.dumps(limits_view, ensure_ascii=False, indent=2),
+            contexto_negociacao=json.dumps(
+                negotiation_context or {},
+                ensure_ascii=False,
+                indent=2,
+            ),
             resposta_negociador=extract_llm_text(response),
         )

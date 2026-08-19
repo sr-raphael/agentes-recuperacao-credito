@@ -160,3 +160,44 @@ def tier_label(tier: int) -> str:
         2: "intermediária",
         3: "final autorizada",
     }.get(tier, "conservadora")
+
+
+def tiers_presented_in_history(
+    history: list[dict[str, str]] | None, limits: dict[str, Any]
+) -> list[dict[str, float | int]]:
+    """Faixas distintas já citadas pelo assistente, em ordem crescente."""
+    seen: set[int] = set()
+    presented: list[dict[str, float | int]] = []
+    for msg in history or []:
+        if str(msg.get("role", "")).lower() != "assistant":
+            continue
+        for value in extract_brl_values(str(msg.get("content") or "")):
+            if _is_debt_anchor(value, limits):
+                continue
+            tier = infer_tier_from_amount(value, limits)
+            if tier is None or tier in seen:
+                continue
+            seen.add(tier)
+            presented.append({"faixa": tier, "valor": round(float(value), 2)})
+    presented.sort(key=lambda item: int(item["faixa"]))
+    return presented
+
+
+def build_tier_audit_context(
+    *,
+    history: list[dict[str, str]] | None,
+    limits: dict[str, Any],
+    offered_tier: int,
+    target_tier: int,
+    user_input: str,
+    client_refused: bool,
+) -> dict[str, Any]:
+    """Contexto determinístico para o auditor avaliar concessão progressiva."""
+    presented = tiers_presented_in_history(history, limits)
+    return {
+        "faixa_ja_ofertada_antes_deste_turno": offered_tier,
+        "faixa_alvo_deste_turno": target_tier,
+        "cliente_recusou_faixa_anterior_neste_turno": client_refused,
+        "mensagem_cliente_neste_turno": user_input,
+        "faixas_ja_apresentadas": presented,
+    }

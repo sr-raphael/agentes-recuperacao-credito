@@ -11,6 +11,7 @@ from typing import Any, Literal
 ConversationIntent = Literal["saudacao", "negociacao", "continuacao"]
 
 _DEAL_ACCEPTANCE_KEYWORDS = (
+    "sim",
     "aceito",
     "aceita",
     "concordo",
@@ -30,6 +31,14 @@ _DEAL_ACCEPTANCE_KEYWORDS = (
     "to dentro",
     "vamos fechar",
     "quero fechar",
+    "perfeito",
+    "ok",
+    "okay",
+    "maravilha",
+    "excelente",
+    "ótimo",
+    "blz",
+    "beleza",
 )
 
 _GREETING_ONLY_RE = re.compile(
@@ -75,9 +84,14 @@ _PROPOSAL_REFUSAL_KEYWORDS = (
     "dificuldades",
     "sem condicoes",
     "sem dinheiro",
+    "sem esse dinheiro",
     "sem grana",
+    "sem essa grana",
+    "sem essa quantia",
     "desempregado",
     "perdi o emprego",
+    "perdi meu emprego",
+    "perdi o meu emprego",
     "sem emprego",
     "sem renda",
     "recuso",
@@ -92,6 +106,7 @@ _PROPOSAL_REFUSAL_KEYWORDS = (
     "menos que",
     "nao pago",
     "fora do meu alcance",
+    "outra proposta",
 )
 
 
