@@ -439,7 +439,13 @@ class CoordinatorAgent:
         turn_started_at = time.perf_counter()
 
         # Histórico do banco tem prioridade sobre o enviado pelo cliente
-        server_history = self.history_store.get_session_transcript(client_cpf, session_id)
+        server_history = self.history_store.get_session_history_messages(
+            client_cpf, session_id
+        )
+        if server_history is None:
+            server_history = self.history_store.get_session_transcript(
+                client_cpf, session_id
+            )
         history = server_history if server_history is not None else _history_as_dicts(chat_history)
 
         last_etapa = self.history_store.get_last_etapa(client_cpf, session_id)

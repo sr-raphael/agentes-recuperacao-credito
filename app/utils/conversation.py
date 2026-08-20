@@ -82,6 +82,7 @@ _PROPOSAL_REFUSAL_KEYWORDS = (
     "muito alto",
     "dificil",
     "dificuldades",
+    "problemas financeiros",
     "sem condicoes",
     "sem dinheiro",
     "sem esse dinheiro",
@@ -99,6 +100,7 @@ _PROPOSAL_REFUSAL_KEYWORDS = (
     "nao topo",
     "negociar melhor",
     "desconto maior",
+    "maior desconto",
     "melhor condicao",
     "pode melhorar",
     "melhorar",
@@ -107,6 +109,9 @@ _PROPOSAL_REFUSAL_KEYWORDS = (
     "nao pago",
     "fora do meu alcance",
     "outra proposta",
+    "proposta melhor",
+    "proposta mais barata",
+    "proposta mais acessivel",
 )
 
 

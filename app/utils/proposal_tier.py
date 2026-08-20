@@ -6,6 +6,7 @@ import re
 from typing import Any
 
 _TIER_KEYS = ("proposta_1", "proposta_2", "proposta_3")
+_NEGOTIATION_STAGES = frozenset({"negociacao", "acordo_fechado"})
 
 _BRL_RE = re.compile(
     r"R\$\s*(\d{1,3}(?:\.\d{3})*,\d{2}|\d+(?:[.,]\d{2})?)",
@@ -62,6 +63,7 @@ def infer_tier_from_text(text: str, limits: dict[str, Any]) -> int | None:
     tiers = [
         infer_tier_from_amount(v, limits)
         for v in extract_brl_values(text)
+        if not _is_contract_anchor(v, limits)
     ]
     tiers = [t for t in tiers if t is not None]
     return max(tiers) if tiers else None
@@ -71,9 +73,20 @@ def _total_debt(limits: dict[str, Any]) -> float:
     return float(limits.get("principal") or 0) + float(limits.get("juros") or 0)
 
 
-def _is_debt_anchor(value: float, limits: dict[str, Any]) -> bool:
+def _is_contract_anchor(value: float, limits: dict[str, Any]) -> bool:
+    """Valores informativos do contrato (não propostas): total em aberto e juros."""
     total = _total_debt(limits)
-    return total > 0 and abs(value - total) < 1.0
+    if total > 0 and abs(value - total) < 1.0:
+        return True
+    juros = float(limits.get("juros") or 0)
+    return juros > 0 and abs(value - juros) < 1.0
+
+
+def _is_negotiation_assistant_message(msg: dict[str, str]) -> bool:
+    etapa = str(msg.get("etapa") or "").lower()
+    if etapa:
+        return etapa in _NEGOTIATION_STAGES
+    return True
 
 
 def offered_tier_from_history(
@@ -87,8 +100,10 @@ def offered_tier_from_history(
     for msg in history or []:
         if str(msg.get("role", "")).lower() != "assistant":
             continue
+        if not _is_negotiation_assistant_message(msg):
+            continue
         for value in extract_brl_values(str(msg.get("content") or "")):
-            if _is_debt_anchor(value, limits):
+            if _is_contract_anchor(value, limits):
                 continue
             tier = infer_tier_from_amount(value, limits)
             if tier is not None:
@@ -136,7 +151,10 @@ def extract_proposal_metadata(
     Infere faixa (1–3) e valor em R$ a partir do texto do assistente.
     Retorna (None, None) se não houver valor monetário reconhecível.
     """
-    values = extract_brl_values(text)
+    values = [
+        v for v in extract_brl_values(text)
+        if not _is_contract_anchor(v, limits)
+    ]
     if not values:
         return None, None
 
@@ -171,8 +189,10 @@ def tiers_presented_in_history(
     for msg in history or []:
         if str(msg.get("role", "")).lower() != "assistant":
             continue
+        if not _is_negotiation_assistant_message(msg):
+            continue
         for value in extract_brl_values(str(msg.get("content") or "")):
-            if _is_debt_anchor(value, limits):
+            if _is_contract_anchor(value, limits):
                 continue
             tier = infer_tier_from_amount(value, limits)
             if tier is None or tier in seen:
