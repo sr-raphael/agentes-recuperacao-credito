@@ -48,8 +48,10 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
 
-from app.analytics.metrics_loader import (
+from analytics.metrics_loader import (
     load_adherence_summary,
+    load_benchmark_csv,
+    load_benchmark_summary,
     load_effectiveness_summary,
     load_etapa_summary,
     load_funnel_df,
@@ -60,6 +62,7 @@ from app.analytics.metrics_loader import (
 )
 
 DB_PATH = ROOT / "app" / "database" / "credito.db"
+CSV_PATH = ROOT / "analytics" / "data" / "negociacoes.csv"
 OUT_DIR = ROOT / "notebooks" / "output"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -436,6 +439,124 @@ else:
     fig.write_html(html_path)
     print(f"Salvo: {html_path}")
     fig.show()
+'''
+)
+
+md(
+    """## F. Avaliação por Categoria de Modelos (Benchmark)
+
+Análise comparativa das configurações de agentes a partir de `negociacoes.csv`:
+- **Modelos Leves**: `gemini-3.5-flash-lite` no Negociador e no Auditor
+- **Modelos Mistos**: `gemini-3.5-flash-lite` (Negociador) e `gemini-3.5-flash` (Auditor)
+- **Modelos Pesados**: `gemini-3.5-flash` em ambos os agentes
+"""
+)
+
+code(
+    '''df_benchmark = load_benchmark_csv(CSV_PATH)
+resumo_benchmark = load_benchmark_summary(df_benchmark)
+
+print(f"Total de negociações avaliadas: {len(df_benchmark)}")
+display(resumo_benchmark)
+resumo_benchmark.to_csv(OUT_DIR / "benchmark_modelos_resumo.csv", index=False)
+print(f"CSV salvo: {OUT_DIR / 'benchmark_modelos_resumo.csv'}")
+'''
+)
+
+code(
+    '''# 1. Aderente à política por categoria de modelo
+if df_benchmark.empty:
+    print("Sem dados de benchmark.")
+else:
+    fig, ax = plt.subplots(figsize=(8, 5))
+    bars = ax.bar(
+        resumo_benchmark["categoria_modelo"],
+        resumo_benchmark["aderente_politica_pct"],
+        color=CHART_COLOR,
+        width=0.5,
+    )
+    ax.set_title("Aderência à Política por Categoria de Modelo", fontsize=12, fontweight="bold", pad=12)
+    ax.set_ylabel("Aderência à Política (%)")
+    ax.set_ylim(0, 115)
+    for bar in bars:
+        height = bar.get_height()
+        ax.annotate(
+            f"{height:.1f}%",
+            xy=(bar.get_x() + bar.get_width() / 2, height),
+            xytext=(0, 4),
+            textcoords="offset points",
+            ha="center",
+            va="bottom",
+            fontsize=10,
+            fontweight="bold",
+        )
+    salvar(fig, "16_benchmark_aderencia_politica.png")
+    plt.show()
+'''
+)
+
+code(
+    '''# 2. Ajuste do auditor por categoria de modelo
+if df_benchmark.empty:
+    print("Sem dados de benchmark.")
+else:
+    fig, ax = plt.subplots(figsize=(8, 5))
+    bars = ax.bar(
+        resumo_benchmark["categoria_modelo"],
+        resumo_benchmark["ajuste_auditor_pct"],
+        color=CHART_COLOR,
+        width=0.5,
+    )
+    ax.set_title("Taxa de Ajuste pelo Auditor por Categoria de Modelo", fontsize=12, fontweight="bold", pad=12)
+    ax.set_ylabel("Turnos com Ajuste do Auditor (%)")
+    max_val = resumo_benchmark["ajuste_auditor_pct"].max()
+    ax.set_ylim(0, max(50, max_val + 15))
+    for bar in bars:
+        height = bar.get_height()
+        ax.annotate(
+            f"{height:.1f}%",
+            xy=(bar.get_x() + bar.get_width() / 2, height),
+            xytext=(0, 4),
+            textcoords="offset points",
+            ha="center",
+            va="bottom",
+            fontsize=10,
+            fontweight="bold",
+        )
+    salvar(fig, "17_benchmark_ajuste_auditor.png")
+    plt.show()
+'''
+)
+
+code(
+    '''# 3. Coesão textual por categoria de modelo
+if df_benchmark.empty:
+    print("Sem dados de benchmark.")
+else:
+    fig, ax = plt.subplots(figsize=(8, 5))
+    bars = ax.bar(
+        resumo_benchmark["categoria_modelo"],
+        resumo_benchmark["coesao_textual_pct"],
+        color=CHART_COLOR,
+        width=0.5,
+    )
+    ax.set_title("Coesão Textual por Categoria de Modelo", fontsize=12, fontweight="bold", pad=12)
+    ax.set_ylabel("Coesão Textual (%)")
+    ax.set_ylim(0, 115)
+    for bar in bars:
+        height = bar.get_height()
+        ax.annotate(
+            f"{height:.1f}%",
+            xy=(bar.get_x() + bar.get_width() / 2, height),
+            xytext=(0, 4),
+            textcoords="offset points",
+            ha="center",
+            va="bottom",
+            fontsize=10,
+            fontweight="bold",
+        )
+    salvar(fig, "18_benchmark_coesao_textual.png")
+    plt.show()
 '''
 )
 

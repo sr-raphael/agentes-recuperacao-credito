@@ -134,10 +134,11 @@ O notebook está organizado em:
 - **C.** Aderência (auditor, faixa/valor, motivos de rejeição)
 - **D.** Segurança (bloqueios guardrail)
 - **E.** Operacional LLM (tokens, latência, custo)
+- **F.** Avaliação por categoria de modelos (benchmark: Leves, Mistos, Pesados a partir de `negociacoes.csv`)
 
 Saídas em `notebooks/output/` (PNG + HTML interativo).
 
-Loader Python: `app/analytics/metrics_loader.py`.
+Loader Python: `analytics/metrics_loader.py`.
 
 ## Estrutura do projeto
 
@@ -145,12 +146,12 @@ Loader Python: `app/analytics/metrics_loader.py`.
 app/
 ├── agents/          # Coordinator, negociador, auditor, analista de crédito
 ├── api/             # Rotas REST (auth, negociação)
-├── analytics/       # Carga de métricas para notebooks
 ├── database/        # Schema, seed, histórico SQLite
 ├── domain/          # Modelos Pydantic
 ├── security/        # JWT e hash de senhas
 ├── static/chat/     # Frontend do chat
 └── utils/           # Guardrails, playbook, métricas LLM
+analytics/           # Carga de métricas para notebooks
 notebooks/           # Análise de métricas
 postman/             # Scripts de autenticação
 ```

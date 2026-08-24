@@ -19,7 +19,6 @@ _DEAL_ACCEPTANCE_KEYWORDS = (
     "fechado",
     "fechar",
     "pode ser",
-    "pode ser sim",
     "vou pagar",
     "fecha o acordo",
     "fechar o acordo",
@@ -39,6 +38,7 @@ _DEAL_ACCEPTANCE_KEYWORDS = (
     "ótimo",
     "blz",
     "beleza",
+    "ta bom",
 )
 
 _GREETING_ONLY_RE = re.compile(
@@ -89,6 +89,7 @@ _PROPOSAL_REFUSAL_KEYWORDS = (
     "sem grana",
     "sem essa grana",
     "sem essa quantia",
+    "fui demitido",
     "desempregado",
     "perdi o emprego",
     "perdi meu emprego",
@@ -101,7 +102,9 @@ _PROPOSAL_REFUSAL_KEYWORDS = (
     "negociar melhor",
     "desconto maior",
     "maior desconto",
+    "mais desconto",
     "melhor condicao",
+    "condicao melhor",
     "pode melhorar",
     "melhorar",
     "abaixo disso",

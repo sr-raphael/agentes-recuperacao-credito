@@ -9,11 +9,16 @@ from typing import Any
 
 import pandas as pd
 
-_DEFAULT_DB = Path(__file__).resolve().parent.parent / "database" / "credito.db"
+_DEFAULT_DB = Path(__file__).resolve().parent.parent / "app" / "database" / "credito.db"
+_DEFAULT_CSV = Path(__file__).resolve().parent / "data" / "negociacoes.csv"
 
 
 def _default_db_path(db_path: str | Path | None) -> Path:
     return Path(db_path) if db_path else _DEFAULT_DB
+
+
+def _default_csv_path(csv_path: str | Path | None) -> Path:
+    return Path(csv_path) if csv_path else _DEFAULT_CSV
 
 
 def _flatten_auditoria(row: dict[str, Any]) -> dict[str, Any]:
@@ -325,3 +330,87 @@ def load_kpi_table(df: pd.DataFrame | None = None, **kwargs) -> pd.DataFrame:
         ("Segurança", "Taxa bloqueio (%)", round(100.0 * len(bloq) / len(df), 1) if len(df) else 0),
     ]
     return pd.DataFrame(rows, columns=["categoria", "kpi", "valor"])
+
+
+def _categorize_models(row: pd.Series | dict[str, Any]) -> str:
+    """Classifica os pares de modelo em: Modelos Leves, Modelos Mistos ou Modelos Pesados."""
+    neg = str(row.get("Modelo Negociador", "")).strip().lower()
+    aud = str(row.get("Modelo Auditor", "")).strip().lower()
+
+    if "flash-lite" in neg and "flash-lite" in aud:
+        return "Modelos Leves"
+    elif "flash-lite" in neg or "flash-lite" in aud:
+        return "Modelos Mistos"
+    elif "flash" in neg and "flash" in aud:
+        return "Modelos Pesados"
+    return "Outros"
+
+
+def load_benchmark_csv(csv_path: str | Path | None = None) -> pd.DataFrame:
+    """
+    Carrega dados de benchmark qualitativo/quantitativo do arquivo negociacoes.csv,
+    adicionando a classificação de categorias de modelos (Leves, Mistos, Pesados)
+    e normalizando os indicadores booleanos.
+    """
+    path = _default_csv_path(csv_path)
+    if not path.exists():
+        return pd.DataFrame()
+
+    try:
+        df = pd.read_csv(path, sep=";", encoding="utf-8")
+    except UnicodeDecodeError:
+        df = pd.read_csv(path, sep=";", encoding="latin1")
+
+    df_clean = df.copy()
+    df_clean["categoria_modelo"] = df_clean.apply(_categorize_models, axis=1)
+
+    aderente_col = next((c for c in df.columns if "aderente" in c.lower()), None)
+    ajuste_col = next((c for c in df.columns if "ajuste" in c.lower()), None)
+    coesao_col = next((c for c in df.columns if "coes" in c.lower()), None)
+
+    df_clean["aderente_politica"] = (
+        df_clean[aderente_col].astype(str).str.strip().str.upper() == "S"
+        if aderente_col
+        else False
+    )
+    df_clean["ajuste_auditor"] = (
+        df_clean[ajuste_col].astype(str).str.strip().str.upper() == "S"
+        if ajuste_col
+        else False
+    )
+    df_clean["coesao_textual"] = (
+        df_clean[coesao_col].astype(str).str.strip().str.upper() == "S"
+        if coesao_col
+        else False
+    )
+
+    cat_type = pd.CategoricalDtype(
+        categories=["Modelos Leves", "Modelos Mistos", "Modelos Pesados"],
+        ordered=True,
+    )
+    df_clean["categoria_modelo"] = df_clean["categoria_modelo"].astype(cat_type)
+
+    return df_clean
+
+
+def load_benchmark_summary(df: pd.DataFrame | None = None, **kwargs) -> pd.DataFrame:
+    """
+    Agrega as taxas de aderência à política, necessidade de ajuste do auditor
+    e coesão textual por categoria de modelos.
+    """
+    if df is None:
+        df = load_benchmark_csv(**kwargs)
+    if df.empty:
+        return pd.DataFrame()
+
+    return (
+        df.groupby("categoria_modelo", observed=False)
+        .agg(
+            total_amostras=("CPF", "count"),
+            aderente_politica_pct=("aderente_politica", lambda x: round(float(x.mean() * 100), 1)),
+            ajuste_auditor_pct=("ajuste_auditor", lambda x: round(float(x.mean() * 100), 1)),
+            coesao_textual_pct=("coesao_textual", lambda x: round(float(x.mean() * 100), 1)),
+        )
+        .reset_index()
+    )
+
