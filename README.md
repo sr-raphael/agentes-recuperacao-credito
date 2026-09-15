@@ -124,7 +124,7 @@ Negociações gravam por turno em `historico_negociacao`:
 Para gerar gráficos e KPIs do TCC:
 
 ```bash
-python -m jupyter notebook notebooks/analise_metricas.ipynb
+python -m jupyter notebook analytics/notebooks/analise_metricas.ipynb
 ```
 
 O notebook está organizado em:
@@ -136,7 +136,7 @@ O notebook está organizado em:
 - **E.** Operacional LLM (tokens, latência, custo)
 - **F.** Avaliação por categoria de modelos (benchmark: Leves, Mistos, Pesados a partir de `negociacoes.csv`)
 
-Saídas em `notebooks/output/` (PNG + HTML interativo).
+Saídas em `analytics/output/` (PNG + HTML interativo).
 
 Loader Python: `analytics/metrics_loader.py`.
 

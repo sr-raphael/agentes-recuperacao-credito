@@ -1,4 +1,4 @@
-"""Gera notebooks/analise_metricas.ipynb (sem outputs embutidos)."""
+"""Gera analytics/notebooks/analise_metricas.ipynb (sem outputs embutidos)."""
 import json
 from pathlib import Path
 
@@ -30,7 +30,7 @@ Notebook para o TCC: **eficácia da negociação**, **aderência às políticas*
 
 **Pré-requisitos:** `pip install -r requirements.txt`, banco seedado e negociações registradas em `historico_negociacao`.
 
-**Saídas:** gráficos PNG e HTML em `notebooks/output/`, tabela `kpis_resumo.csv`.
+**Saídas:** gráficos PNG e HTML em `analytics/output/`, tabela `kpis_resumo.csv`.
 """
 )
 
@@ -38,9 +38,9 @@ code(
     '''import sys
 from pathlib import Path
 
-ROOT = Path.cwd().resolve()
-if not (ROOT / "app").exists() and (ROOT.parent / "app").exists():
-    ROOT = ROOT.parent
+# Localiza a raiz do projeto procurando recursivamente pelo diretório 'app'
+_cwd = Path.cwd().resolve()
+ROOT = next((d for d in [_cwd, *_cwd.parents] if (d / "app").exists()), _cwd)
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
@@ -63,7 +63,7 @@ from analytics.metrics_loader import (
 
 DB_PATH = ROOT / "app" / "database" / "credito.db"
 CSV_PATH = ROOT / "analytics" / "data" / "negociacoes.csv"
-OUT_DIR = ROOT / "notebooks" / "output"
+OUT_DIR = ROOT / "analytics" / "output"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 CHART_COLOR = "steelblue"
