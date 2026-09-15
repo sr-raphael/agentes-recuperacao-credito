@@ -284,19 +284,19 @@ code(
     '''if custos_categoria.empty:
     print("Sem dados de custos por categoria de modelo.")
 else:
-    fig, ax = plt.subplots(figsize=(8, 5))
+    fig, ax = plt.subplots()
     bars = ax.bar(
         custos_categoria["categoria_modelo"],
         custos_categoria["custo_medio_usd"],
         color=CHART_COLOR,
         width=0.45,
     )
-    ax.set_title("Custo Médio por Sessão por Categoria de Modelo", fontsize=12, fontweight="bold", pad=12)
+    ax.set_title("Custo médio por sessão conforme a categoria de modelo LLM", fontweight="bold")
     ax.set_ylabel("Custo Médio por Sessão (USD)")
     ax.set_xlabel("Categoria de Modelo")
     max_val = custos_categoria["custo_medio_usd"].max()
     ax.set_ylim(0, max_val * 1.25)
-    ax.bar_label(bars, fmt="$%.6f", padding=4, fontsize=10, fontweight="bold")
+    ax.bar_label(bars, fmt="$%.6f", padding=4, fontweight="bold")
     salvar(fig, "01_custo_medio_por_categoria.png")
     plt.show()
 '''
@@ -323,25 +323,33 @@ code(
     '''if llm.empty:
     print("Sem turnos com LLM.")
 else:
-    fig, ax = plt.subplots(figsize=(10, 5))
-    order = llm.groupby("etapa")["total_latencia_ms"].median().sort_values().index
-    palette = {e: ALERT_COLOR if is_security_alert(e) else CHART_COLOR for e in order}
-    sns.boxplot(
-        data=llm,
-        x="etapa",
-        y="total_latencia_ms",
-        order=order,
-        hue="etapa",
-        palette=palette,
-        dodge=False,
-        legend=False,
-        ax=ax,
-    )
-    ax.set_xlabel("Etapa")
-    ax.set_ylabel("Latência (ms)")
-    ax.set_title("Latência por etapa")
-    plt.xticks(rotation=25, ha="right")
-    salvar(fig, "03_latencia_por_etapa.png")
+    records = []
+    for _, r in llm.iterrows():
+        if r["negociador_model"]:
+            records.append({
+                "Agente": "Negociador",
+                "Modelo": r["negociador_model"],
+                "Latencia": r["negociador_latencia_ms"],
+            })
+        if r["auditor_model"]:
+            records.append({
+                "Agente": "Auditor",
+                "Modelo": r["auditor_model"],
+                "Latencia": r["auditor_latencia_ms"],
+            })
+
+    df_lat = pd.DataFrame(records)
+    lat_modelo = df_lat.groupby("Modelo", as_index=False)["Latencia"].mean()
+
+    fig, ax = plt.subplots()
+    bars = ax.bar(lat_modelo["Modelo"], lat_modelo["Latencia"], color=CHART_COLOR, width=0.45)
+    ax.set_title("Latência média por modelo de LLM", fontweight="bold")
+    ax.set_ylabel("Latência Média (ms)")
+    ax.set_xlabel("Modelo")
+    max_val = lat_modelo["Latencia"].max()
+    ax.set_ylim(0, max_val * 1.25)
+    ax.bar_label(bars, fmt="%.0f ms", padding=4, fontweight="bold")
+    salvar(fig, "03_latencia_por_modelo.png")
     plt.show()
 '''
 )
@@ -350,17 +358,35 @@ code(
     '''if llm.empty:
     print("Sem turnos com LLM.")
 else:
-    totais = pd.Series(
-        {
-            "Negociador": llm["negociador_input_tokens"].sum() + llm["negociador_output_tokens"].sum(),
-            "Auditor": llm["auditor_input_tokens"].sum() + llm["auditor_output_tokens"].sum(),
-        }
-    )
+    records = []
+    for _, r in llm.iterrows():
+        if r["negociador_model"]:
+            records.append({
+                "Agente": "Negociador",
+                "Modelo": r["negociador_model"],
+                "Tokens": r["negociador_input_tokens"] + r["negociador_output_tokens"],
+            })
+        if r["auditor_model"]:
+            records.append({
+                "Agente": "Auditor",
+                "Modelo": r["auditor_model"],
+                "Tokens": r["auditor_input_tokens"] + r["auditor_output_tokens"],
+            })
+
+    df_tokens = pd.DataFrame(records)
+    totais = df_tokens.groupby(["Agente", "Modelo"], as_index=False)["Tokens"].sum()
+    totais["Agente"] = pd.Categorical(totais["Agente"], categories=["Negociador", "Auditor"], ordered=True)
+    totais = totais.sort_values(["Agente", "Modelo"])
+
     fig, ax = plt.subplots()
-    totais.plot(kind="bar", ax=ax, color=CHART_COLOR)
+    palette = {"gemini-3.5-flash": "steelblue", "gemini-3.5-flash-lite": "#6baed6"}
+    sns.barplot(data=totais, x="Agente", y="Tokens", hue="Modelo", palette=palette, ax=ax)
+    ax.set_title("Tokens totais por agente e modelo de LLM")
     ax.set_ylabel("Tokens (input + output)")
-    ax.set_title("Tokens totais por agente")
-    ax.tick_params(axis="x", rotation=0)
+    ax.set_ylim(0, totais["Tokens"].max() * 1.2)
+    for container in ax.containers:
+        ax.bar_label(container, fmt="%d", padding=4)
+    ax.legend(title="Modelo")
     salvar(fig, "04_tokens_por_agente.png")
     plt.show()
 '''
