@@ -52,10 +52,12 @@ from analytics.metrics_loader import (
     load_adherence_summary,
     load_benchmark_csv,
     load_benchmark_summary,
+    load_category_cost_summary,
     load_effectiveness_summary,
     load_etapa_summary,
     load_funnel_df,
     load_kpi_table,
+    load_model_cost_summary,
     load_security_summary,
     load_session_summary,
     load_turn_metrics_df,
@@ -102,6 +104,8 @@ code(
     '''df = load_turn_metrics_df(DB_PATH)
 sessoes = load_session_summary(df)
 etapas = load_etapa_summary(df)
+custos_modelo = load_model_cost_summary(df)
+custos_categoria = load_category_cost_summary(df)
 eficacia = load_effectiveness_summary(df)
 aderencia = load_adherence_summary(df)
 funil = load_funnel_df(df)
@@ -277,20 +281,23 @@ display(etapas)
 )
 
 code(
-    '''if sessoes.empty:
-    print("Sem sessões para plotar.")
+    '''if custos_categoria.empty:
+    print("Sem dados de custos por categoria de modelo.")
 else:
-    plot_df = sessoes.sort_values("custo_total_usd", ascending=False).head(15)
-    fig, ax = plt.subplots(figsize=(10, max(4, len(plot_df) * 0.35)))
-    ax.barh(
-        plot_df["session_id"].str[:8] + "…",
-        plot_df["custo_total_usd"],
+    fig, ax = plt.subplots(figsize=(8, 5))
+    bars = ax.bar(
+        custos_categoria["categoria_modelo"],
+        custos_categoria["custo_medio_usd"],
         color=CHART_COLOR,
+        width=0.45,
     )
-    ax.set_xlabel("Custo total (USD)")
-    ax.set_title("Custo LLM por sessão")
-    ax.invert_yaxis()
-    salvar(fig, "01_custo_por_sessao.png")
+    ax.set_title("Custo Médio por Sessão por Categoria de Modelo", fontsize=12, fontweight="bold", pad=12)
+    ax.set_ylabel("Custo Médio por Sessão (USD)")
+    ax.set_xlabel("Categoria de Modelo")
+    max_val = custos_categoria["custo_medio_usd"].max()
+    ax.set_ylim(0, max_val * 1.25)
+    ax.bar_label(bars, fmt="$%.6f", padding=4, fontsize=10, fontweight="bold")
+    salvar(fig, "01_custo_medio_por_categoria.png")
     plt.show()
 '''
 )

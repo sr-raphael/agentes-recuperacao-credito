@@ -126,6 +126,7 @@ def load_turn_metrics_df(db_path: str | Path | None = None) -> pd.DataFrame:
             "score": int(row["score"]),
             "dias_atraso": row["dias_atraso"],
             "valor_original": row["valor_original"],
+            "llm_metrics_json": row.get("llm_metrics_json"),
         }
         base.update(_flatten_metrics(row))
         base.update(_flatten_auditoria(row))
@@ -143,8 +144,85 @@ def load_turn_metrics_df(db_path: str | Path | None = None) -> pd.DataFrame:
     return df
 
 
+def load_model_cost_summary(df: pd.DataFrame | None = None, **kwargs) -> pd.DataFrame:
+    """
+    Calcula custo total, custo médio, tokens médios e total de chamadas por modelo
+    (ex: 'gemini-3.5-flash', 'gemini-3.5-flash-lite') a partir de llm_metrics_json.
+    """
+    if df is None:
+        df = load_turn_metrics_df(**kwargs)
+    if df.empty:
+        return pd.DataFrame()
+
+    pricing_map = {
+        "gemini-3.5-flash": {"input": 0.15, "output": 0.60},
+        "gemini-3.5-flash-lite": {"input": 0.10, "output": 0.40},
+        "gemini-2.5-flash": {"input": 0.15, "output": 0.60},
+        "gemini-2.0-flash": {"input": 0.10, "output": 0.40},
+        "gemini-2.5-pro": {"input": 1.25, "output": 10.00},
+    }
+
+    records: list[dict[str, Any]] = []
+    for raw in df["llm_metrics_json"].dropna():
+        if not raw:
+            continue
+        try:
+            data = json.loads(raw) if isinstance(raw, str) else raw
+        except (json.JSONDecodeError, TypeError):
+            continue
+
+        for agent_name, info in (data.get("agents") or {}).items():
+            model = str(info.get("model") or "").strip()
+            if not model:
+                continue
+            inp = int(info.get("input_tokens") or 0)
+            out = int(info.get("output_tokens") or 0)
+            lat = int(info.get("latencia_ms") or 0)
+
+            p = pricing_map.get(model, {"input": 0.15, "output": 0.60})
+            cost = (inp * p["input"] + out * p["output"]) / 1_000_000
+
+            records.append({
+                "modelo": model,
+                "agente": agent_name,
+                "input_tokens": inp,
+                "output_tokens": out,
+                "total_tokens": inp + out,
+                "custo_usd": cost,
+                "latencia_ms": lat,
+            })
+
+    if not records:
+        return pd.DataFrame()
+
+    df_models = pd.DataFrame(records)
+    return (
+        df_models.groupby("modelo", as_index=False)
+        .agg(
+            chamadas=("custo_usd", "count"),
+            custo_total_usd=("custo_usd", "sum"),
+            custo_medio_usd=("custo_usd", "mean"),
+            tokens_medio=("total_tokens", "mean"),
+            latencia_media_ms=("latencia_ms", "mean"),
+        )
+        .sort_values("custo_medio_usd", ascending=False)
+    )
+
+
+def _classify_session_models(models: set[str]) -> str:
+    has_flash = any("flash" in m and "lite" not in m for m in models)
+    has_lite = any("lite" in m for m in models)
+    if has_flash and has_lite:
+        return "Modelos Mistos"
+    if has_flash:
+        return "Modelos Pesados"
+    if has_lite:
+        return "Modelos Leves"
+    return "Sem LLM"
+
+
 def load_session_summary(df: pd.DataFrame | None = None, **kwargs) -> pd.DataFrame:
-    """Agrega métricas por session_id."""
+    """Agrega métricas por session_id, incluindo a categoria dos modelos utilizados."""
     if df is None:
         df = load_turn_metrics_df(**kwargs)
     if df.empty:
@@ -161,6 +239,28 @@ def load_session_summary(df: pd.DataFrame | None = None, **kwargs) -> pd.DataFra
         custo_total_usd=("custo_estimado_usd", "sum"),
         acordo_fechado=("acordo_fechado", "max"),
     )
+
+    # Identifica os modelos de cada sessão a partir de llm_metrics_json
+    session_models: dict[str, set[str]] = {}
+    for _, row in df.iterrows():
+        sid = row["session_id"]
+        if sid not in session_models:
+            session_models[sid] = set()
+        raw = row.get("llm_metrics_json")
+        if raw:
+            try:
+                data = json.loads(raw) if isinstance(raw, str) else raw
+            except (json.JSONDecodeError, TypeError):
+                data = {}
+            for info in (data.get("agents") or {}).values():
+                m = str(info.get("model") or "").strip()
+                if m:
+                    session_models[sid].add(m)
+
+    agg["categoria_modelo"] = agg["session_id"].map(
+        lambda sid: _classify_session_models(session_models.get(sid, set()))
+    )
+
     if not llm.empty:
         llm_agg = llm.groupby("session_id", as_index=False).agg(
             tokens_total=("total_tokens", "sum"),
@@ -169,6 +269,38 @@ def load_session_summary(df: pd.DataFrame | None = None, **kwargs) -> pd.DataFra
         )
         agg = agg.merge(llm_agg, on="session_id", how="left")
     return agg.fillna(0)
+
+
+def load_category_cost_summary(df: pd.DataFrame | None = None, **kwargs) -> pd.DataFrame:
+    """
+    Agrega o custo médio por sessão agrupado por categoria de modelo:
+    - Modelos Leves (flash-lite)
+    - Modelos Mistos (flash + flash-lite)
+    - Modelos Pesados (flash)
+    """
+    if df is None:
+        df = load_turn_metrics_df(**kwargs)
+    if df.empty:
+        return pd.DataFrame()
+
+    sessoes = load_session_summary(df)
+    sessoes_validas = sessoes[sessoes["categoria_modelo"] != "Sem LLM"]
+    if sessoes_validas.empty:
+        return pd.DataFrame()
+
+    ordem = ["Modelos Leves", "Modelos Mistos", "Modelos Pesados"]
+    cat_type = pd.CategoricalDtype(categories=ordem, ordered=True)
+
+    summary = (
+        sessoes_validas.groupby("categoria_modelo", observed=False, as_index=False)
+        .agg(
+            sessoes=("session_id", "count"),
+            custo_total_usd=("custo_total_usd", "sum"),
+            custo_medio_usd=("custo_total_usd", "mean"),
+        )
+    )
+    summary["categoria_modelo"] = summary["categoria_modelo"].astype(cat_type)
+    return summary.sort_values("categoria_modelo").reset_index(drop=True)
 
 
 def load_etapa_summary(df: pd.DataFrame | None = None, **kwargs) -> pd.DataFrame:
