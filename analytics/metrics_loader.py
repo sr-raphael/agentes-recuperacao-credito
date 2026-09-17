@@ -24,9 +24,11 @@ def _default_csv_path(csv_path: str | Path | None) -> Path:
 def _flatten_auditoria(row: dict[str, Any]) -> dict[str, Any]:
     audit: dict[str, Any] = {}
     raw = row.get("auditoria_json")
-    if raw:
+    if pd.notna(raw) and raw:
         try:
-            audit = json.loads(raw) if isinstance(raw, str) else raw
+            parsed = json.loads(raw) if isinstance(raw, str) else raw
+            if isinstance(parsed, dict):
+                audit = parsed
         except (json.JSONDecodeError, TypeError):
             audit = {}
     return {
@@ -42,15 +44,17 @@ def _flatten_auditoria(row: dict[str, Any]) -> dict[str, Any]:
 def _flatten_metrics(row: dict[str, Any]) -> dict[str, Any]:
     metrics: dict[str, Any] = {}
     raw = row.get("llm_metrics_json")
-    if raw:
+    if pd.notna(raw) and raw:
         try:
-            metrics = json.loads(raw) if isinstance(raw, str) else raw
+            parsed = json.loads(raw) if isinstance(raw, str) else raw
+            if isinstance(parsed, dict):
+                metrics = parsed
         except (json.JSONDecodeError, TypeError):
             metrics = {}
 
-    agents = metrics.get("agents") or {}
-    neg = agents.get("negociador") or {}
-    aud = agents.get("auditor") or {}
+    agents = metrics.get("agents") if isinstance(metrics.get("agents"), dict) else {}
+    neg = agents.get("negociador") if isinstance(agents.get("negociador"), dict) else {}
+    aud = agents.get("auditor") if isinstance(agents.get("auditor"), dict) else {}
 
     return {
         "llm_calls": int(metrics.get("llm_calls") or 0),
@@ -171,7 +175,12 @@ def load_model_cost_summary(df: pd.DataFrame | None = None, **kwargs) -> pd.Data
         except (json.JSONDecodeError, TypeError):
             continue
 
+        if not isinstance(data, dict):
+            continue
+
         for agent_name, info in (data.get("agents") or {}).items():
+            if not isinstance(info, dict):
+                continue
             model = str(info.get("model") or "").strip()
             if not model:
                 continue
@@ -247,15 +256,17 @@ def load_session_summary(df: pd.DataFrame | None = None, **kwargs) -> pd.DataFra
         if sid not in session_models:
             session_models[sid] = set()
         raw = row.get("llm_metrics_json")
-        if raw:
+        if pd.notna(raw) and raw:
             try:
                 data = json.loads(raw) if isinstance(raw, str) else raw
             except (json.JSONDecodeError, TypeError):
                 data = {}
-            for info in (data.get("agents") or {}).values():
-                m = str(info.get("model") or "").strip()
-                if m:
-                    session_models[sid].add(m)
+            if isinstance(data, dict):
+                for info in (data.get("agents") or {}).values():
+                    if isinstance(info, dict):
+                        m = str(info.get("model") or "").strip()
+                        if m:
+                            session_models[sid].add(m)
 
     agg["categoria_modelo"] = agg["session_id"].map(
         lambda sid: _classify_session_models(session_models.get(sid, set()))
